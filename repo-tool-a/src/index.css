@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Jost:wght@500&display=swap');
+
+@theme {
+  --color-app-bg: #FAFAF8;
+  --color-card: #FFFFFF;
+  --color-card-border: #EFEFEC;
+  --color-text-primary: #111318;
+  --color-text-secondary: #5B5B66;
+  --color-text-tertiary: #6B6B76;
+  --color-text-quaternary: #8A8A94;
+  --color-accent: #1F9A63;
+  --font-inter: 'Inter', system-ui, sans-serif;
+  --font-jost: 'Jost', system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-app-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-inter);
+}
