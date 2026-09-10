@@ -79,7 +79,10 @@ export default function App() {
         });
       }
     }
-    submitRatings({ assessmentId: assessment.id, sessionId, stakeholderGroup, rows });
+    submitRatings(rows).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('Failed to submit ratings:', err);
+    });
   };
 
   return (

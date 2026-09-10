@@ -9,50 +9,50 @@
 **Live URL:** none yet — not deployed to Netlify
 
 ## Current state
-Frontend is built and working end-to-end against mock, in-memory data (no Supabase
-connection yet — deliberately deferred per the builder's request this session).
-`npm run build` succeeds; the full participant flow (Welcome → Rating Criteria →
-Stakeholder Group → one-topic-per-page rating → Submit → Thank you) was exercised
-in a real browser via Playwright and matches the reference prototype pixel-for-pixel.
-
-A Supabase project ("greenfriend Double Materiality Assessment", id
-`evwmxduudcujtibirmga`, region eu-west-1) already exists in the linked
-organization but has no tables yet — schema/RLS work has not started.
+Frontend and Supabase backend are both built. `assessments`, `iros`, and `ratings`
+tables exist with RLS in the existing Supabase project (reused per the builder's
+instruction — see Build decisions), and `src/lib/data.js` now queries them for
+real instead of using mock data. `npm run build` succeeds. The full participant
+flow was verified against mock data in a real browser (gating, skip/answer-instead,
+back navigation preserving answers, submit) before the Supabase swap; the swap
+itself could not be re-verified live in this session because this session's
+sandbox cannot reach `*.supabase.co` directly (confirmed via the egress proxy
+status — an organization policy block, not a code issue). Needs a real
+browser check once deployed, or from the builder's own machine.
 
 ## Last session
-Session 1: scaffolded the Vite/React/Tailwind app, ported `ParticipantExperience.jsx`
-and `ApusLogoLight.jsx` faithfully from `reference-prototype/`, built a mock data
-layer (`src/lib/data.js`) standing in for Supabase, wired slug-based routing
-(`/survey/:slug`), and verified the whole flow (gating, skip/answer-instead, back
-navigation preserving answers, submit) in a headless browser.
+Session 1: built the whole tool in two passes per the builder's direction
+("frontend first, Supabase later"). Pass 1 — scaffolded Vite/React/Tailwind,
+ported `ParticipantExperience.jsx`/`ApusLogoLight.jsx` faithfully, mock data
+layer, verified full flow in-browser. Pass 2 — built the `assessments`/`iros`/
+`ratings` schema + RLS on the existing Supabase project (`evwmxduudcujtibirmga`,
+not the spec's proposed `greenfriend-dma` name — builder confirmed reuse), wrote
+docs/supabase-setup.md, swapped `src/lib/data.js` to real Supabase queries,
+seeded a demo assessment (`slug=acme-2026`) for testing.
 
 ## Remaining work
-- [ ] Confirm Supabase project name/org with the builder (existing project is
-      named "greenfriend Double Materiality Assessment", not exactly
-      `greenfriend-dma` as proposed in the spec — reuse it or rename/recreate?)
-- [ ] Build `assessments`, `iros`, `ratings` tables + RLS policies via Supabase MCP
-- [ ] Write docs/supabase-setup.md
-- [ ] Replace `src/lib/data.js` mock functions with real Supabase queries
-      (`fetchAssessmentBySlug`, `submitRatings`) using `@supabase/supabase-js`
-      (already added to package.json but not yet used)
-- [ ] Add `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` handling (`.env.example`,
-      Netlify env vars)
-- [ ] Decide how to source Stakeholder Group options: `stakeholder_options` is a
-      Tool B–owned table that doesn't exist yet (Tool B not built). Current build
-      uses the spec's default option lists as a hardcoded fallback in
-      `src/lib/data.js`. When wiring Supabase, attempt to read `stakeholder_options`
-      and fall back to these defaults if the table/row doesn't exist.
+- [ ] Verify the live Supabase connection in a real browser once deployed (this
+      session's sandbox can't reach supabase.co directly — see Known issues)
 - [ ] Builder: upgrade the Supabase project to Pro in the dashboard before real
       client use
+- [ ] Decide whether to keep or delete the seeded demo assessment
+      (`slug='acme-2026'`) before real client use
+- [ ] When Tool B is built and creates `stakeholder_options`, confirm the
+      Stakeholder Group screen picks it up automatically (code already queries
+      it with a fallback to defaults — see docs/supabase-setup.md)
 - [ ] Mobile-responsive pass (out of scope for v1 per spec Section 12, but worth
       a look — the layout is already fairly narrow/centered)
-- [ ] Acceptance criteria pass against Section 13 once Supabase is wired up
-      (criteria 1–7 already verified against mock data; 8–9 need the real backend
-      and a live deploy)
-- [ ] Deploy to Netlify — connect repo, add env vars (Netlify MCP not available
-      in this session)
+- [ ] Acceptance criteria 8–9 (Section 13) need a live deploy to fully verify
+      (1–7 verified against mock data this session)
+- [ ] Deploy to Netlify — connect repo, add `VITE_SUPABASE_URL` /
+      `VITE_SUPABASE_ANON_KEY` env vars (Netlify MCP not available in this
+      session, so this is a manual step)
 
 ## Build decisions
+- Reused the existing Supabase project ("greenfriend Double Materiality
+  Assessment", id `evwmxduudcujtibirmga`) instead of creating a new one named
+  `greenfriend-dma` as the spec proposed — explicit builder instruction this
+  session. Documented in docs/supabase-setup.md.
 - Route shape: `/survey/:slug` (per the spec's own suggested example in Section 15),
   parsed with a plain regex against `window.location.pathname` — no router
   library added, since this tool only ever renders one route shape.
@@ -67,6 +67,14 @@ navigation preserving answers, submit) in a headless browser.
   `CRITERIA_FOR` (was module-private) and passed the selected `stakeholder` group
   through the existing `onSubmit(answers, relevantIros)` callback as a third
   argument. Both are integration seams only — no layout/copy/interaction changed.
+- `assessments`/`iros` RLS policies grant `anon` a blanket `select` (`using (true)`)
+  rather than a slug-scoped policy, since RLS can't see the app's query filter —
+  the app itself always queries by exact `slug`/`assessment_id`, so in practice
+  this behaves as "the assessment being viewed," matching the spec's intent, but
+  technically anon could enumerate all assessments/IROs by ID. Acceptable for a
+  no-login public survey tool with no sensitive data in these tables; flagging in
+  case the builder wants a stricter policy later (e.g. only exposing `status =
+  'active'` assessments).
 - Netlify `_redirects` (`/* /index.html 200`) added so `/survey/:slug` survives a
   direct load/refresh once deployed.
 - Dropped `papaparse` from dependencies (present in the reference prototype's
@@ -76,15 +84,21 @@ navigation preserving answers, submit) in a headless browser.
 - Netlify MCP connector is not available in this session — deploy step will need
   the builder to connect the repo and set env vars manually in the Netlify
   dashboard.
-- Supabase connection is intentionally not wired up yet (see Remaining work).
+- This session's sandbox cannot reach `*.supabase.co` directly (confirmed via
+  the egress proxy's status endpoint — `connect_rejected`/403 on every attempt).
+  Schema changes went through fine via the Supabase MCP tool (a different path),
+  but the frontend's live Supabase calls could not be exercised in a browser
+  here. Re-test after deploying, or run `npm run dev` on a machine without this
+  restriction.
 - The existing Supabase project's name doesn't exactly match the spec's proposed
-  `greenfriend-dma` — needs a decision before schema work starts.
+  `greenfriend-dma` — reused as-is per builder instruction (see Build decisions).
 - The prototype's `ratings` shape (one row per criterion, supporting a null
   "skipped" value) still needs to be reconciled against Tool B's
   `assessor_ratings` table per product-spec.md Section 15 — unchanged from
   session 0's note, still open.
 
 ## Notes for next session
-Wire up Supabase: confirm/use the existing project, build the `assessments` /
-`iros` / `ratings` schema + RLS from CLAUDE.md, write docs/supabase-setup.md,
-then swap `src/lib/data.js`'s mock functions for real queries.
+Deploy to Netlify and do a real end-to-end pass against the live Supabase project
+(the sandbox in this session couldn't reach it directly). Then confirm all of
+Section 13's acceptance criteria, including 8 (Supabase writes) and 9 (Netlify
+URL reachable).
