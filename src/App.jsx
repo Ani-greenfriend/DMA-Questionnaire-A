@@ -18,7 +18,8 @@ function Centered({ children }) {
 
 export default function App() {
   const [slug] = useState(slugFromPath);
-  const [status, setStatus] = useState('loading'); // loading | not-found | ready
+  const [status, setStatus] = useState('loading'); // loading | not-found | config-error | ready
+  const [configError, setConfigError] = useState(null);
   const [assessment, setAssessment] = useState(null);
   const [iros, setIros] = useState([]);
   const [stakeholders, setStakeholders] = useState(null);
@@ -30,17 +31,23 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    fetchAssessmentBySlug(slug).then((result) => {
-      if (cancelled) return;
-      if (!result) {
-        setStatus('not-found');
-        return;
-      }
-      setAssessment(result.assessment);
-      setIros(result.iros);
-      setStakeholders(result.stakeholders);
-      setStatus('ready');
-    });
+    fetchAssessmentBySlug(slug)
+      .then((result) => {
+        if (cancelled) return;
+        if (!result) {
+          setStatus('not-found');
+          return;
+        }
+        setAssessment(result.assessment);
+        setIros(result.iros);
+        setStakeholders(result.stakeholders);
+        setStatus('ready');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setConfigError(err.message);
+        setStatus('config-error');
+      });
     return () => { cancelled = true; };
   }, [slug]);
 
@@ -48,6 +55,16 @@ export default function App() {
     return (
       <Centered>
         <p className="text-[13px]" style={{ color: '#8A8A94' }}>Loading survey…</p>
+      </Centered>
+    );
+  }
+
+  if (status === 'config-error') {
+    return (
+      <Centered>
+        <div className="flex justify-center mb-5"><ApusLogoLight height={26} /></div>
+        <p className="text-[15px] font-semibold mb-1" style={{ color: '#111318' }}>Survey misconfigured</p>
+        <p className="text-[12.5px]" style={{ color: '#8A8A94' }}>{configError}</p>
       </Centered>
     );
   }
