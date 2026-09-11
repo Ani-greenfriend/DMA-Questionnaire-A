@@ -6,40 +6,40 @@
 
 **Session:** 2
 **Last updated:** 2026-09-11 — by Claude Code
-**Live URL:** not yet confirmed — Netlify deploy fix pushed, needs a redeploy to verify
+**Live URL:** confirmed working by the builder — exact URL not yet recorded here (ask builder / check Netlify dashboard)
 
 ## Current state
 Frontend and Supabase backend are both built (see session 1). This session fixed
-a broken Netlify deploy: the repo had everything nested one level deeper than it
-should be (under a `repo-tool-a/` folder), so Netlify couldn't find `package.json`
-at the root it was pointed at — it published nothing, hence Netlify's own generic
-"Page not found" 404 on the live URL. The repo has been flattened to match the
-structure CLAUDE.md always described (root now directly contains this file,
-`src/`, `docs/`, etc. — no wrapper folder), and a `netlify.toml` was added so
-build command/publish directory don't depend on manual UI configuration. Also
-hardened `src/lib/supabaseClient.js` so a missing `VITE_SUPABASE_URL` /
-`VITE_SUPABASE_ANON_KEY` shows a clear on-page message instead of a blank page
-(the app crashed at module load before this fix).
+a broken Netlify deploy and the fix is now confirmed live: the repo had
+everything nested one level deeper than it should be (under a `repo-tool-a/`
+folder), so Netlify couldn't find `package.json` at the root it was pointed at —
+it published nothing, hence Netlify's own generic "Page not found" 404. The repo
+was flattened to match the structure CLAUDE.md always described (root now
+directly contains this file, `src/`, `docs/`, etc.), and `netlify.toml` pins the
+build command/publish directory. Also hardened `src/lib/supabaseClient.js` so a
+missing `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` shows a clear on-page
+message instead of a blank page.
+
+The fix went out as PR #2 (PR #1 had already merged before the fix was pushed,
+so a second PR was needed) — merged into `main`, builder redeployed on Netlify,
+and confirmed the site now works.
 
 ## Last session
 Session 2: builder reported the Netlify deploy wasn't working (build succeeded,
-site blank, and separately Netlify's own 404 page on the live URL). Root-caused
+site blank, then separately Netlify's own 404 page on the live URL). Root-caused
 to two issues: (1) the whole project lived under `repo-tool-a/` instead of the
 repo root, so Netlify's zero-config build couldn't find `package.json` — fixed by
 flattening the repo with `git mv`; (2) missing/invalid Supabase env vars crash
 `createClient()` synchronously, blanking the whole page with no error shown —
 fixed by making `supabaseClient.js` surface a config error as data instead of
-throwing, and `App.jsx` renders it as a real on-screen message.
+throwing. Shipped as PR #2 (since PR #1 was already merged before this fix
+existed), merged, redeployed, and the builder confirmed it now works.
 
 ## Remaining work
-- [ ] Builder: redeploy on Netlify (trigger a new deploy after this push) and
-      confirm the site now loads instead of 404ing
-- [ ] Builder: double check `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are
-      set in Netlify's Site settings → Environment variables — if they're still
-      missing, the site will now show a clear "Survey misconfigured" message
-      instead of a blank page, which will confirm/rule this out immediately
-- [ ] Once live, verify against the real Supabase connection (this session's
-      sandbox still can't reach supabase.co directly — see Known issues)
+- [ ] Record the live Netlify URL here once shared
+- [ ] Do a real end-to-end pass against the live site + live Supabase project
+      (this session's sandbox can't reach supabase.co directly to do it — see
+      Known issues)
 - [ ] Builder: upgrade the Supabase project to Pro in the dashboard before real
       client use
 - [ ] Decide whether to keep or delete the seeded demo assessment
@@ -49,8 +49,9 @@ throwing, and `App.jsx` renders it as a real on-screen message.
       it with a fallback to defaults — see docs/supabase-setup.md)
 - [ ] Mobile-responsive pass (out of scope for v1 per spec Section 12, but worth
       a look — the layout is already fairly narrow/centered)
-- [ ] Acceptance criteria 8–9 (Section 13) need a live deploy to fully verify
-      (1–7 verified against mock data in session 1)
+- [ ] Acceptance criteria pass against spec Section 13, now that the site is
+      live (1–7 verified against mock data in session 1; 8–9 need the live
+      Supabase connection double-checked)
 
 ## Build decisions
 - Flattened the repo (moved everything out of `repo-tool-a/` to the repo root)
@@ -94,8 +95,7 @@ throwing, and `App.jsx` renders it as a real on-screen message.
   the egress proxy's status endpoint — `connect_rejected`/403 on every attempt).
   Schema changes went through fine via the Supabase MCP tool (a different path),
   but the frontend's live Supabase calls could not be exercised in a browser
-  here. Re-test after deploying, or run `npm run dev` on a machine without this
-  restriction.
+  here. The builder's own redeploy is the real-world confirmation that it works.
 - The existing Supabase project's name doesn't exactly match the spec's proposed
   `greenfriend-dma` — reused as-is per builder instruction (see Build decisions).
 - The prototype's `ratings` shape (one row per criterion, supporting a null
@@ -104,7 +104,7 @@ throwing, and `App.jsx` renders it as a real on-screen message.
   session 0's note, still open.
 
 ## Notes for next session
-Confirm the Netlify redeploy actually loads the site (not the 404 page and not a
-"Survey misconfigured" message), then do a real end-to-end pass against the live
-Supabase project. Then confirm all of Section 13's acceptance criteria, including
-8 (Supabase writes) and 9 (Netlify URL reachable).
+Get the live Netlify URL recorded here. Do a full walkthrough of the live site
+(not just against mock data) and check off Section 13's acceptance criteria,
+especially 8 (Supabase writes actually landing in the `ratings` table) and 9
+(Netlify URL reachable independent of the Consultant Console).
