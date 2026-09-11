@@ -4,35 +4,42 @@
 > anything. Update it at every save point. Replace content — do not append.
 > History lives in git.
 
-**Session:** 1
-**Last updated:** 2026-09-10 — by Claude Code
-**Live URL:** none yet — not deployed to Netlify
+**Session:** 2
+**Last updated:** 2026-09-11 — by Claude Code
+**Live URL:** not yet confirmed — Netlify deploy fix pushed, needs a redeploy to verify
 
 ## Current state
-Frontend and Supabase backend are both built. `assessments`, `iros`, and `ratings`
-tables exist with RLS in the existing Supabase project (reused per the builder's
-instruction — see Build decisions), and `src/lib/data.js` now queries them for
-real instead of using mock data. `npm run build` succeeds. The full participant
-flow was verified against mock data in a real browser (gating, skip/answer-instead,
-back navigation preserving answers, submit) before the Supabase swap; the swap
-itself could not be re-verified live in this session because this session's
-sandbox cannot reach `*.supabase.co` directly (confirmed via the egress proxy
-status — an organization policy block, not a code issue). Needs a real
-browser check once deployed, or from the builder's own machine.
+Frontend and Supabase backend are both built (see session 1). This session fixed
+a broken Netlify deploy: the repo had everything nested one level deeper than it
+should be (under a `repo-tool-a/` folder), so Netlify couldn't find `package.json`
+at the root it was pointed at — it published nothing, hence Netlify's own generic
+"Page not found" 404 on the live URL. The repo has been flattened to match the
+structure CLAUDE.md always described (root now directly contains this file,
+`src/`, `docs/`, etc. — no wrapper folder), and a `netlify.toml` was added so
+build command/publish directory don't depend on manual UI configuration. Also
+hardened `src/lib/supabaseClient.js` so a missing `VITE_SUPABASE_URL` /
+`VITE_SUPABASE_ANON_KEY` shows a clear on-page message instead of a blank page
+(the app crashed at module load before this fix).
 
 ## Last session
-Session 1: built the whole tool in two passes per the builder's direction
-("frontend first, Supabase later"). Pass 1 — scaffolded Vite/React/Tailwind,
-ported `ParticipantExperience.jsx`/`ApusLogoLight.jsx` faithfully, mock data
-layer, verified full flow in-browser. Pass 2 — built the `assessments`/`iros`/
-`ratings` schema + RLS on the existing Supabase project (`evwmxduudcujtibirmga`,
-not the spec's proposed `greenfriend-dma` name — builder confirmed reuse), wrote
-docs/supabase-setup.md, swapped `src/lib/data.js` to real Supabase queries,
-seeded a demo assessment (`slug=acme-2026`) for testing.
+Session 2: builder reported the Netlify deploy wasn't working (build succeeded,
+site blank, and separately Netlify's own 404 page on the live URL). Root-caused
+to two issues: (1) the whole project lived under `repo-tool-a/` instead of the
+repo root, so Netlify's zero-config build couldn't find `package.json` — fixed by
+flattening the repo with `git mv`; (2) missing/invalid Supabase env vars crash
+`createClient()` synchronously, blanking the whole page with no error shown —
+fixed by making `supabaseClient.js` surface a config error as data instead of
+throwing, and `App.jsx` renders it as a real on-screen message.
 
 ## Remaining work
-- [ ] Verify the live Supabase connection in a real browser once deployed (this
-      session's sandbox can't reach supabase.co directly — see Known issues)
+- [ ] Builder: redeploy on Netlify (trigger a new deploy after this push) and
+      confirm the site now loads instead of 404ing
+- [ ] Builder: double check `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are
+      set in Netlify's Site settings → Environment variables — if they're still
+      missing, the site will now show a clear "Survey misconfigured" message
+      instead of a blank page, which will confirm/rule this out immediately
+- [ ] Once live, verify against the real Supabase connection (this session's
+      sandbox still can't reach supabase.co directly — see Known issues)
 - [ ] Builder: upgrade the Supabase project to Pro in the dashboard before real
       client use
 - [ ] Decide whether to keep or delete the seeded demo assessment
@@ -43,16 +50,17 @@ seeded a demo assessment (`slug=acme-2026`) for testing.
 - [ ] Mobile-responsive pass (out of scope for v1 per spec Section 12, but worth
       a look — the layout is already fairly narrow/centered)
 - [ ] Acceptance criteria 8–9 (Section 13) need a live deploy to fully verify
-      (1–7 verified against mock data this session)
-- [ ] Deploy to Netlify — connect repo, add `VITE_SUPABASE_URL` /
-      `VITE_SUPABASE_ANON_KEY` env vars (Netlify MCP not available in this
-      session, so this is a manual step)
+      (1–7 verified against mock data in session 1)
 
 ## Build decisions
+- Flattened the repo (moved everything out of `repo-tool-a/` to the repo root)
+  to match CLAUDE.md's own documented Project Structure exactly, rather than
+  papering over the mismatch with a Netlify base-directory setting — this way
+  no future Netlify (or any other) config needs special-casing.
 - Reused the existing Supabase project ("greenfriend Double Materiality
   Assessment", id `evwmxduudcujtibirmga`) instead of creating a new one named
-  `greenfriend-dma` as the spec proposed — explicit builder instruction this
-  session. Documented in docs/supabase-setup.md.
+  `greenfriend-dma` as the spec proposed — explicit builder instruction in
+  session 1. Documented in docs/supabase-setup.md.
 - Route shape: `/survey/:slug` (per the spec's own suggested example in Section 15),
   parsed with a plain regex against `window.location.pathname` — no router
   library added, since this tool only ever renders one route shape.
@@ -76,14 +84,12 @@ seeded a demo assessment (`slug=acme-2026`) for testing.
   case the builder wants a stricter policy later (e.g. only exposing `status =
   'active'` assessments).
 - Netlify `_redirects` (`/* /index.html 200`) added so `/survey/:slug` survives a
-  direct load/refresh once deployed.
+  direct load/refresh once deployed; `netlify.toml` pins build command/publish
+  directory explicitly.
 - Dropped `papaparse` from dependencies (present in the reference prototype's
   package.json for Tool B's CSV import) since Tool A never imports CSV.
 
 ## Known issues
-- Netlify MCP connector is not available in this session — deploy step will need
-  the builder to connect the repo and set env vars manually in the Netlify
-  dashboard.
 - This session's sandbox cannot reach `*.supabase.co` directly (confirmed via
   the egress proxy's status endpoint — `connect_rejected`/403 on every attempt).
   Schema changes went through fine via the Supabase MCP tool (a different path),
@@ -98,7 +104,7 @@ seeded a demo assessment (`slug=acme-2026`) for testing.
   session 0's note, still open.
 
 ## Notes for next session
-Deploy to Netlify and do a real end-to-end pass against the live Supabase project
-(the sandbox in this session couldn't reach it directly). Then confirm all of
-Section 13's acceptance criteria, including 8 (Supabase writes) and 9 (Netlify
-URL reachable).
+Confirm the Netlify redeploy actually loads the site (not the 404 page and not a
+"Survey misconfigured" message), then do a real end-to-end pass against the live
+Supabase project. Then confirm all of Section 13's acceptance criteria, including
+8 (Supabase writes) and 9 (Netlify URL reachable).

@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+import { supabase, supabaseConfigError } from './supabaseClient';
 
 // Stakeholder Group options are meant to live in `stakeholder_options`, a table
 // owned by the Consultant Console (Tool B), which hasn't been built yet. Once it
@@ -22,6 +22,8 @@ async function fetchStakeholderOptions(assessmentId) {
 }
 
 export async function fetchAssessmentBySlug(slug) {
+  if (supabaseConfigError) throw new Error(supabaseConfigError);
+
   const { data: assessment, error } = await supabase
     .from('assessments')
     .select('id, name, mode, perspective_filter, welcome_text, logo_url, mandatory')
