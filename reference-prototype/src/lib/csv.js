@@ -94,3 +94,84 @@ export function parseCsv(text, esrsTopics) {
 
   return { iros, errors };
 }
+
+// ---- Topic library CSV (Topics module) ----
+// A distinct, richer format matching the master Topics library's fields —
+// separate from the legacy per-assessment format above.
+
+export const TOPIC_LIBRARY_COLUMNS = ['IRO Type', 'ESRS Topic', 'ESRS Sub-topic Code', 'Short Title', 'Description', 'Actual or Potential', 'Value Chain Location'];
+
+const VALUE_CHAIN_MAP = {
+  'own operations': 'own', 'own': 'own',
+  'upstream': 'upstream', 'upstream / supply chain': 'upstream', 'supply chain': 'upstream',
+  'downstream': 'downstream', 'downstream / product use & end-of-life': 'downstream', 'product use': 'downstream',
+};
+
+export function generateTopicLibraryExampleCsv(esrsSubtopics) {
+  const rows = [
+    { 'IRO Type': 'Negative Impact', 'ESRS Topic': 'E1', 'ESRS Sub-topic Code': 'E1-6', 'Short Title': 'Stationary combustion GHG', Description: 'Direct Scope 1 GHG emissions from stationary combustion in factory furnaces', 'Actual or Potential': 'Actual', 'Value Chain Location': 'Own operations' },
+    { 'IRO Type': 'Risk', 'ESRS Topic': 'E1', 'ESRS Sub-topic Code': 'E1-9', 'Short Title': 'Carbon pricing exposure', Description: 'Transition risk from evolving carbon pricing regulations (EU ETS)', 'Actual or Potential': 'Potential', 'Value Chain Location': 'Own operations' },
+    { 'IRO Type': 'Negative Impact', 'ESRS Topic': 'S1', 'ESRS Sub-topic Code': 'S1-14', 'Short Title': 'Workplace injury rate', Description: 'Occupational health and safety incidents at manufacturing sites', 'Actual or Potential': 'Actual', 'Value Chain Location': 'Own operations' },
+  ];
+  const noteRow = { 'IRO Type': '# Valid: Negative Impact / Positive Impact / Risk / Opportunity', 'ESRS Topic': `# One of: ${Object.keys(esrsSubtopics).join(', ')}`, 'ESRS Sub-topic Code': '# e.g. E1-6 — must match a real code for that topic', 'Short Title': '', Description: '', 'Actual or Potential': '# Actual / Potential', 'Value Chain Location': '# Own operations / Upstream / Downstream' };
+  return Papa.unparse([noteRow, ...rows], { columns: TOPIC_LIBRARY_COLUMNS, delimiter: ';' });
+}
+
+export function parseTopicLibraryCsv(text, esrsTopics, esrsSubtopics) {
+  const result = Papa.parse(text.trim(), { header: true, skipEmptyLines: true, delimiter: ';' });
+  const errors = [];
+  const topics = [];
+
+  result.data.forEach((row, idx) => {
+    const rowNum = idx + 2;
+    // Skip instruction/comment rows (first column starts with '#')
+    if (String(row['IRO Type'] || '').trim().startsWith('#')) return;
+
+    const missing = ['IRO Type', 'ESRS Topic', 'Short Title'].filter((c) => !row[c] || String(row[c]).trim() === '');
+    if (missing.length) {
+      errors.push({ row: rowNum, message: `Missing required column(s): ${missing.join(', ')}` });
+      return;
+    }
+
+    const typeKey = String(row['IRO Type']).trim().toLowerCase();
+    const iroType = TYPE_MAP[typeKey];
+    if (!iroType) {
+      errors.push({ row: rowNum, message: `IRO Type "${row['IRO Type']}" not recognized (expected Negative Impact / Positive Impact / Risk / Opportunity)` });
+      return;
+    }
+
+    const esrsTopicId = String(row['ESRS Topic']).trim().toUpperCase();
+    if (!esrsTopics.find((t) => t.id === esrsTopicId)) {
+      errors.push({ row: rowNum, message: `ESRS Topic "${row['ESRS Topic']}" not recognized — expected one of E1–E5, S1–S4, G1` });
+      return;
+    }
+
+    const subCode = String(row['ESRS Sub-topic Code'] || '').trim().toUpperCase();
+    let subtopic = '';
+    if (subCode) {
+      const match = (esrsSubtopics[esrsTopicId] || []).find((s) => s.toUpperCase().startsWith(subCode));
+      if (!match) {
+        errors.push({ row: rowNum, message: `Sub-topic code "${row['ESRS Sub-topic Code']}" not found under ${esrsTopicId} — left blank, assign manually`, flagged: true });
+      } else {
+        subtopic = match;
+      }
+    }
+
+    const actualKey = String(row['Actual or Potential'] || 'actual').trim().toLowerCase();
+    const valueChainKey = String(row['Value Chain Location'] || 'own operations').trim().toLowerCase();
+
+    topics.push({
+      id: crypto.randomUUID(),
+      iroType,
+      esrsTopicId,
+      subtopic,
+      shortTitle: row['Short Title'],
+      description: row.Description || '',
+      actual: actualKey !== 'potential',
+      valueChain: VALUE_CHAIN_MAP[valueChainKey] || 'own',
+    });
+  });
+
+  return { topics, errors };
+}
+

@@ -1,13 +1,17 @@
-export default function ExpertAssessmentCreated({ mode, surveyName, link, startDate, endDate, onCopy, onPreview, onKickOff, onGoToOverview }) {
+export default function ExpertAssessmentCreated({ mode, surveyName, link, startDate, endDate, alreadyRun, onCopy, onPreview, onKickOff, onGoToOverview }) {
   const isQuant = mode === 'quantitative';
   return (
     <div className="max-w-xl mx-auto text-center">
       <div className="bg-surface rounded-2xl p-10">
-        <p className="text-[32px] mb-3">🎉</p>
-        <p className="font-semibold text-[17px] mb-2">"{surveyName}" has been created</p>
+        <p className="text-[32px] mb-3">{alreadyRun ? '✓' : '🎉'}</p>
+        <p className="font-semibold text-[17px] mb-2">
+          {alreadyRun ? `"${surveyName}" has been updated` : `"${surveyName}" has been created`}
+        </p>
         <p className="text-[12.5px] text-text-secondary mb-6">
           {isQuant
             ? <>It will run from <b className="text-text-primary">{startDate}</b> to <b className="text-text-primary">{endDate || 'no end date set'}</b>.</>
+            : alreadyRun
+            ? 'Your changes are saved. The session you already ran keeps its existing ratings — re-open it below only if you want to continue or re-rate topics.'
             : "You're ready to run this live with your expert group whenever you are."}
         </p>
 
@@ -38,7 +42,22 @@ export default function ExpertAssessmentCreated({ mode, surveyName, link, startD
           </>
         )}
 
-        {!isQuant && (
+        {!isQuant && alreadyRun && (
+          <>
+            <button
+              onClick={onGoToOverview}
+              className="w-full text-[13px] font-semibold rounded-xl px-4 py-3"
+              style={{ background: '#4C6FFF', color: '#F5F6FA' }}
+            >
+              Back to overview
+            </button>
+            <button onClick={onKickOff} className="w-full text-[12.5px] text-text-secondary mt-3">
+              Or re-open the live session to continue rating
+            </button>
+          </>
+        )}
+
+        {!isQuant && !alreadyRun && (
           <button
             onClick={onKickOff}
             className="w-full text-[13px] font-semibold rounded-xl px-4 py-3"
@@ -48,9 +67,11 @@ export default function ExpertAssessmentCreated({ mode, surveyName, link, startD
           </button>
         )}
 
-        <button onClick={onGoToOverview} className="w-full text-[12.5px] text-text-secondary mt-3">
-          Or go to Assessment overview
-        </button>
+        {!(!isQuant && alreadyRun) && (
+          <button onClick={onGoToOverview} className="w-full text-[12.5px] text-text-secondary mt-3">
+            Or go to Assessment overview
+          </button>
+        )}
       </div>
     </div>
   );

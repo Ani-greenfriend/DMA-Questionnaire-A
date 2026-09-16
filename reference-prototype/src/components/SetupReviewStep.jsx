@@ -36,12 +36,12 @@ const DEFAULT_STAKEHOLDERS = {
 
 export { DEFAULT_WELCOME, QUAL_EXPERT_WELCOME, IMPACT_TASK, FINANCIAL_TASK, LIKELIHOOD_NOTE, DEFAULT_STAKEHOLDERS };
 
-function EditableCard({ title, value, onChange, minHeight = 100 }) {
+function EditableCard({ title, icon, accent, value, onChange, minHeight = 100 }) {
   const [editing, setEditing] = useState(false);
   return (
-    <div className="bg-surface rounded-2xl p-5 mb-4">
+    <div className="rounded-2xl p-5 mb-4" style={{ background: `linear-gradient(160deg, ${accent}12, var(--color-surface))`, borderLeft: `3px solid ${accent}` }}>
       <div className="flex justify-between items-center mb-3">
-        <p className="text-[12.5px] font-semibold">{title}</p>
+        <p className="text-[12.5px] font-semibold flex items-center gap-2"><span className="text-[15px]">{icon}</span>{title}</p>
         <button onClick={() => setEditing((e) => !e)} className="text-[11.5px] text-badge-blue">
           {editing ? 'Done' : 'Edit'}
         </button>
@@ -60,12 +60,26 @@ function EditableCard({ title, value, onChange, minHeight = 100 }) {
   );
 }
 
-function ParticipantListCard({ participants, setParticipants }) {
+function ParticipantListCard({ participants, setParticipants, stakeholderMap, setStakeholderMap }) {
   const [draft, setDraft] = useState({ name: '', title: '', topic: '' });
+  const activeGroupNames = stakeholderMap.filter((g) => g.perspectives.length > 0).map((g) => g.name);
 
   function add() {
     if (!draft.name.trim()) return;
     setParticipants((prev) => [...prev, draft]);
+
+    // Saved back to the master Stakeholder map when the topic matches an
+    // existing group, so this person is there next time too — not just for
+    // this one assessment. Typing a topic that doesn't match anything just
+    // stays local to this assessment; it doesn't silently create a new group.
+    const matchedGroup = stakeholderMap.find((g) => g.name.toLowerCase() === draft.topic.trim().toLowerCase());
+    if (matchedGroup && draft.name.trim()) {
+      setStakeholderMap((prev) => prev.map((g) => (
+        g.id === matchedGroup.id
+          ? { ...g, members: [...g.members, { id: crypto.randomUUID(), name: draft.name, title: draft.title, company: '', email: '', pillar: 'S' }] }
+          : g
+      )));
+    }
     setDraft({ name: '', title: '', topic: '' });
   }
   function remove(i) {
@@ -73,9 +87,11 @@ function ParticipantListCard({ participants, setParticipants }) {
   }
 
   return (
-    <div className="bg-surface rounded-2xl p-5 mb-4">
-      <p className="text-[12.5px] font-semibold mb-1">Expected participants</p>
-      <p className="text-[11px] text-text-secondary mb-3">Optional — helps the facilitator know who's in the room and what they cover.</p>
+    <div className="rounded-2xl p-5 mb-4" style={{ background: 'linear-gradient(160deg, #D79A4C12, var(--color-surface))', borderLeft: '3px solid #D79A4C' }}>
+      <p className="text-[12.5px] font-semibold mb-1 flex items-center gap-2"><span className="text-[15px]">🧑‍🤝‍🧑</span>Expected participants</p>
+      <p className="text-[11px] text-text-secondary mb-3">
+        Optional — helps the facilitator know who's in the room and what they cover. Match the topic to an existing stakeholder group and this person is saved to your master map too, ready for next time.
+      </p>
 
       {participants.length > 0 && (
         <div className="flex flex-col gap-1.5 mb-3">
@@ -93,14 +109,21 @@ function ParticipantListCard({ participants, setParticipants }) {
       <div className="grid grid-cols-3 gap-2">
         <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Name" className="bg-surface-2 rounded-lg px-3 py-2 text-[12px] outline-none" />
         <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Title" className="bg-surface-2 rounded-lg px-3 py-2 text-[12px] outline-none" />
-        <input value={draft.topic} onChange={(e) => setDraft({ ...draft, topic: e.target.value })} placeholder="Expert topic" className="bg-surface-2 rounded-lg px-3 py-2 text-[12px] outline-none" />
+        <input
+          value={draft.topic} onChange={(e) => setDraft({ ...draft, topic: e.target.value })}
+          placeholder="Expert topic" list="stakeholder-group-suggestions"
+          className="bg-surface-2 rounded-lg px-3 py-2 text-[12px] outline-none"
+        />
+        <datalist id="stakeholder-group-suggestions">
+          {activeGroupNames.map((name) => <option key={name} value={name} />)}
+        </datalist>
       </div>
       <button onClick={add} className="text-[11.5px] border border-border-apus rounded-lg px-3 py-1.5 mt-2">+ Add participant</button>
     </div>
   );
 }
 
-function StakeholderCard({ stakeholders, setStakeholders }) {
+function StakeholderCard({ stakeholders, setStakeholders, perspectiveFilter }) {
   const [newImpact, setNewImpact] = useState('');
   const [newFinancial, setNewFinancial] = useState('');
 
@@ -113,11 +136,18 @@ function StakeholderCard({ stakeholders, setStakeholders }) {
     resetFn('');
   }
 
-  return (
-    <div className="bg-surface rounded-2xl p-5 mb-4">
-      <p className="text-[12.5px] font-semibold mb-3">Which group best describes you? — stakeholder options</p>
+  // Only offer the perspective(s) this assessment actually covers — an
+  // Impact-only assessment has no use for Financial stakeholder options,
+  // and showing them anyway invites picking ones that can never apply.
+  const visibleGroups = perspectiveFilter === 'impact' ? ['impact']
+    : perspectiveFilter === 'financial' ? ['financial']
+    : ['impact', 'financial']; // 'full'
 
-      {['impact', 'financial'].map((group) => (
+  return (
+    <div className="rounded-2xl p-5 mb-4" style={{ background: 'linear-gradient(160deg, #D79A4C12, var(--color-surface))', borderLeft: '3px solid #D79A4C' }}>
+      <p className="text-[12.5px] font-semibold mb-3 flex items-center gap-2"><span className="text-[15px]">🧑‍🤝‍🧑</span>Which group best describes you? — stakeholder options</p>
+
+      {visibleGroups.map((group) => (
         <div key={group} className="mb-4 last:mb-0">
           <p className="text-[10.5px] font-semibold text-text-secondary tracking-wide mb-2">{group === 'impact' ? 'IMPACT PERSPECTIVE' : 'FINANCIAL PERSPECTIVE'}</p>
           <div className="flex flex-wrap gap-2 mb-2">
@@ -159,8 +189,8 @@ function TopicsCard({ title, iros, overrides, setOverrides }) {
   }
 
   return (
-    <div className="bg-surface rounded-2xl p-5 mb-4">
-      <p className="text-[12.5px] font-semibold mb-1">{title}</p>
+    <div className="rounded-2xl p-5 mb-4" style={{ background: 'linear-gradient(160deg, #9B7FE012, var(--color-surface))', borderLeft: '3px solid #9B7FE0' }}>
+      <p className="text-[12.5px] font-semibold mb-1 flex items-center gap-2"><span className="text-[15px]">🗂️</span>{title}</p>
       <p className="text-[11px] text-text-secondary mb-3">{iros.length} IROs — edit a topic's name or description if it needs clarifying for participants.</p>
       <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
         {iros.map((iro) => (
@@ -203,6 +233,7 @@ export default function SetupReviewStep({
   taskText, setTaskText,
   stakeholders, setStakeholders,
   participants, setParticipants,
+  stakeholderMap, setStakeholderMap,
   topicOverrides, setTopicOverrides,
   mandatory, setMandatory,
   onBack, onCreate,
@@ -211,14 +242,22 @@ export default function SetupReviewStep({
   return (
     <div className="max-w-2xl">
       <button onClick={onBack} className="text-[11.5px] text-text-secondary mb-4">← Back to general info</button>
-      <h2 className="text-[24px] font-bold text-white mb-1">Review & customize</h2>
+      <div className="flex items-center gap-3 mb-1">
+        <h2 className="text-[24px] font-bold text-white">Review & customize</h2>
+        <span
+          className="text-[11px] font-semibold rounded-full px-2.5 py-1 flex items-center gap-1.5"
+          style={{ background: isQual ? 'rgba(76,111,255,0.16)' : 'rgba(94,217,150,0.16)', color: isQual ? '#4C6FFF' : '#5ED996' }}
+        >
+          {isQual ? '🧭 Qualitative' : '📝 Quantitative'}
+        </span>
+      </div>
       <p className="text-[12px] text-text-secondary mb-6">This is what participants will see. Edit anything below before creating the {isQual ? 'expert assessment' : 'questionnaire'}.</p>
 
-      <EditableCard title="Introduction" value={welcomeText} onChange={setWelcomeText} />
-      <EditableCard title="Rating Criteria" value={taskText} onChange={setTaskText} />
+      <EditableCard title="Introduction" icon="👋" accent="#5ED996" value={welcomeText} onChange={setWelcomeText} />
+      <EditableCard title="Rating Criteria" icon="📋" accent="#4C6FFF" value={taskText} onChange={setTaskText} />
       {isQual
-        ? <ParticipantListCard participants={participants} setParticipants={setParticipants} />
-        : <StakeholderCard stakeholders={stakeholders} setStakeholders={setStakeholders} />}
+        ? <ParticipantListCard participants={participants} setParticipants={setParticipants} stakeholderMap={stakeholderMap} setStakeholderMap={setStakeholderMap} />
+        : <StakeholderCard stakeholders={stakeholders} setStakeholders={setStakeholders} perspectiveFilter={perspectiveFilter} />}
       <TopicsCard title="Assessment" iros={iros} overrides={topicOverrides} setOverrides={setTopicOverrides} />
 
       <div className="bg-surface rounded-2xl p-5 mb-6 flex items-center justify-between">
@@ -240,7 +279,7 @@ export default function SetupReviewStep({
         className="w-full text-[13px] font-semibold rounded-xl py-3.5"
         style={{ background: '#4C6FFF', color: '#F5F6FA' }}
       >
-        {isQual ? 'Create expert assessment' : `Create questionnaire — ${surveyName || 'Untitled'}`}
+        {isQual ? 'Choose who participates →' : 'Choose who receives it →'}
       </button>
     </div>
   );

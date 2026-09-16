@@ -41,7 +41,7 @@ export default function DmaMascot({ title, children }) {
         onMouseEnter={() => setHovering(true)}
         onMouseLeave={() => setHovering(false)}
         className="w-14 h-14 rounded-full flex items-center justify-center transition-transform hover:scale-105"
-        style={{ background: '#100E15', border: '1px solid #2A2830', boxShadow: '0 10px 24px -6px rgba(0,0,0,0.5)' }}
+        style={{ background: 'linear-gradient(145deg, rgba(76,111,255,0.28), rgba(94,217,150,0.22))', border: '1px solid rgba(94,217,150,0.4)', boxShadow: '0 10px 28px -6px rgba(76,111,255,0.5)' }}
       >
         <SwiftIcon />
       </button>

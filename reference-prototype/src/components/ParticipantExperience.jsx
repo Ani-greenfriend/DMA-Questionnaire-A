@@ -60,11 +60,6 @@ function Welcome({ text, logo, companyName, onNext }) {
   return (
     <Shell>
       <Card>
-        {logo ? (
-          <img src={logo} alt="Company logo" className="w-14 h-14 rounded-2xl object-contain mb-4" />
-        ) : (
-          <p className="text-[28px] mb-3">🌱</p>
-        )}
         <p className="text-[20px] font-bold mb-4" style={{ color: '#111318' }}>
           {companyName ? `${companyName} sustainability survey` : 'Sustainability survey'}
         </p>
@@ -257,14 +252,23 @@ function Question({ iro, criteria, answers, onAnswerCriterion, onBack, onNext, c
   );
 }
 
-function Submit({ onSubmit }) {
+function Submit({ comment, setComment, onSubmit }) {
   return (
     <Shell>
       <Card>
         <p className="text-[20px] font-bold mb-2" style={{ color: '#111318' }}>That's everything</p>
-        <p className="text-[13.5px] mb-7" style={{ color: '#5B5B66' }}>
+        <p className="text-[13.5px] mb-5" style={{ color: '#5B5B66' }}>
           Review your answers using "Previous" if you'd like, or submit the survey now.
         </p>
+        <p className="text-[13px] font-semibold mb-1.5" style={{ color: '#111318' }}>Any other comments?</p>
+        <p className="text-[11.5px] mb-2" style={{ color: '#8A8A94' }}>Optional — anything you didn't get to say above, or context you think matters.</p>
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder="Type here…"
+          className="w-full rounded-xl p-3.5 text-[13.5px] outline-none mb-7 min-h-[100px]"
+          style={{ background: '#F5F6F3', color: '#111318', border: '1px solid #EAEAE4' }}
+        />
         <PrimaryButton onClick={onSubmit}>Submit survey →</PrimaryButton>
       </Card>
     </Shell>
@@ -293,6 +297,7 @@ export default function ParticipantExperience({
   const [stakeholder, setStakeholder] = useState(null);
   const [qIndex, setQIndex] = useState(0);
   const [answers, setAnswers] = useState({}); // `${iroId}::${criterionKey}` -> value
+  const [comment, setComment] = useState('');
 
   const relevantIros = iros.filter((i) => {
     if (perspectiveFilter === 'impact') return hasImpactAxis(i.iroType);
@@ -338,7 +343,7 @@ export default function ParticipantExperience({
   } else if (phase === 'done') {
     content = <ThankYou />;
   } else {
-    content = <Submit onSubmit={() => { onSubmit(answers, relevantIros); setPhase('done'); }} />;
+    content = <Submit comment={comment} setComment={setComment} onSubmit={() => { onSubmit(answers, relevantIros, comment); setPhase('done'); }} />;
   }
 
   return (
@@ -358,10 +363,24 @@ export default function ParticipantExperience({
           <button onClick={congrats.onCopy} className="text-[11px] font-semibold" style={{ color: '#1F9A63' }}>Copy link</button>
         </div>
       )}
-      <div className="flex items-center justify-center pt-10 pb-4">
-        <ApusLogoLight height={30} />
+      <div className="flex flex-col items-center justify-center pt-10 pb-4">
+        {logo ? (
+          <img src={logo} alt={companyName ? `${companyName} logo` : 'Company logo'} className="h-9 max-w-[180px] object-contain" />
+        ) : (
+          <div
+            className="w-11 h-11 rounded-xl flex items-center justify-center"
+            style={{ border: '1.5px dashed #C7C9C2', background: '#FAFAF8' }}
+            title="The consultant's brand logo will appear here once uploaded in the console"
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#ACACB0" strokeWidth="1.6"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>
+          </div>
+        )}
       </div>
       {content}
+      <div className="flex items-center justify-center gap-1.5 pb-8 pt-2 opacity-60">
+        <span className="text-[10.5px]" style={{ color: '#8A8A94' }}>Hosted on</span>
+        <ApusLogoLight height={13} />
+      </div>
     </div>
   );
 }

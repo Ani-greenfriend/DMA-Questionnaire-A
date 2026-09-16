@@ -46,7 +46,7 @@ export default function SurveySetupStep({ mode, modeLabel, defaultNameHint, valu
         />
         <p className="text-[10.5px] text-text-secondary mb-4 italic">e.g. "{defaultNameHint}"</p>
 
-        <p className="text-[11px] text-text-secondary mb-1.5">SURVEY DESCRIPTION</p>
+        <p className="text-[11px] text-text-secondary mb-1.5">SURVEY DESCRIPTION <span className="opacity-60">(optional)</span></p>
         <textarea
           value={meta.description || ''} onChange={(e) => set('description', e.target.value)}
           placeholder={`This is the ${defaultNameHint.toLowerCase()} (for internal use).`}

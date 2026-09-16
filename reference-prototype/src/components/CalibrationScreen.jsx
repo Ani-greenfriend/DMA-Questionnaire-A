@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { aggregateIro, hasImpactAxis, MAGNITUDE_BANDS, CALC_METHODOLOGY_VERSION } from '../lib/calc';
 import { PILLAR_COLOR, ESRS_TOPICS, TYPE_LABEL, TYPE_COLOR } from '../lib/topics';
+import { CalibrationIcon } from './icons';
 import DmaMascot from './DmaMascot';
 
 export default function CalibrationScreen({ iros, calibrations, setCalibrations, assessments = [] }) {
@@ -27,6 +28,12 @@ export default function CalibrationScreen({ iros, calibrations, setCalibrations,
             The original calculated value is always kept, and any change needs a stated reason — nothing is overwritten silently.
           </p>
         </DmaMascot>
+        <h2 className="text-[24px] font-bold text-white mb-4 flex items-center gap-3">
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: 'linear-gradient(135deg, #E8B26B, #D79A4C)', boxShadow: '0 6px 14px -4px rgba(0,0,0,0.4)' }}>
+            <CalibrationIcon size={19} />
+          </span>
+          Calibration
+        </h2>
         <div className="bg-surface rounded-2xl p-10 text-center text-text-secondary text-[13px]">Complete a qualitative assessment first.</div>
       </div>
     );
@@ -44,7 +51,12 @@ export default function CalibrationScreen({ iros, calibrations, setCalibrations,
       </DmaMascot>
 
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-[24px] font-bold text-white">Calibration</h2>
+        <h2 className="text-[24px] font-bold text-white flex items-center gap-3">
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: 'linear-gradient(135deg, #E8B26B, #D79A4C)', boxShadow: '0 6px 14px -4px rgba(0,0,0,0.4)' }}>
+            <CalibrationIcon size={19} />
+          </span>
+          Calibration
+        </h2>
         {assessments.length > 0 && (
           <select
             value={assessmentFilter}
@@ -83,17 +95,21 @@ export default function CalibrationScreen({ iros, calibrations, setCalibrations,
 function CalibrationAccordionRow({ iro, isOpen, onToggle, calibration, onChange }) {
   const agg = aggregateIro(iro);
   const calculated = hasImpactAxis(iro.iroType) ? agg.impactScore : agg.financialScore;
-  const cal = calibration ?? { owner: iro.assessments[0]?.assessor ?? '', moderator: '', calibratedValue: null, notes: '', bandValue: null };
+  const cal = calibration ?? { owner: iro.assessments[0]?.assessor ?? '', moderator: '', calibratedValue: null, notes: '', bandValue: null, history: [], signedOffBy: null, signedOffAt: null };
+  const history = cal.history ?? [];
   const topic = ESRS_TOPICS.find((t) => t.id === iro.topic);
   const pillar = PILLAR_COLOR[topic?.cat] ?? PILLAR_COLOR.E;
 
   const [adjusting, setAdjusting] = useState(false);
   const [draftValue, setDraftValue] = useState(cal.calibratedValue ?? calculated ?? 2.5);
-  const [draftNotes, setDraftNotes] = useState(cal.notes ?? '');
+  const [draftNotes, setDraftNotes] = useState('');
+  const [signing, setSigning] = useState(false);
+  const [signerName, setSignerName] = useState('');
 
   const flagged = agg.overrideTriggered || agg.discrepancy;
   const moderatorBlocked = cal.moderator && cal.moderator === cal.owner;
   const isCalibrated = cal.calibratedValue !== null && cal.calibratedValue !== undefined;
+  const isSignedOff = !!cal.signedOffBy;
 
   function update(patch) {
     onChange({ ...cal, ...patch });
@@ -101,22 +117,43 @@ function CalibrationAccordionRow({ iro, isOpen, onToggle, calibration, onChange 
 
   function openAdjust() {
     setDraftValue(cal.calibratedValue ?? calculated ?? 2.5);
-    setDraftNotes(cal.notes ?? '');
+    setDraftNotes('');
     setAdjusting(true);
   }
 
   function saveAdjustment() {
-    if (!window.confirm(`Are you sure you want to calibrate this result?\n\n"${iro.name}" will change from ${calculated !== null ? calculated.toFixed(1) : 'not yet rated'} (calculated) to ${draftValue.toFixed(1)}.`)) {
+    const fromValue = isCalibrated ? cal.calibratedValue : calculated;
+    if (!window.confirm(`Are you sure you want to calibrate this result?\n\n"${iro.name}" will change from ${fromValue !== null ? fromValue.toFixed(1) : 'not yet rated'} to ${draftValue.toFixed(1)}.`)) {
       return;
     }
-    update({ calibratedValue: draftValue, notes: draftNotes, calibratedAt: Date.now() });
+    // Every change is appended, never overwritten — the full old-to-new
+    // trail stays visible, and sign-off is invalidated since the number
+    // it approved no longer holds.
+    const entry = { fromValue, toValue: draftValue, notes: draftNotes, changedBy: cal.moderator || cal.owner || 'Unspecified', changedAt: Date.now() };
+    update({ calibratedValue: draftValue, notes: draftNotes, calibratedAt: Date.now(), history: [...history, entry], signedOffBy: null, signedOffAt: null });
     setAdjusting(false);
   }
 
   function resetToCalculated() {
-    if (!window.confirm('Reset to the calculated value? Your calibration notes will be kept.')) return;
-    update({ calibratedValue: null });
+    if (!window.confirm('Reset to the calculated value? The history trail is kept.')) return;
+    const entry = { fromValue: cal.calibratedValue, toValue: calculated, notes: 'Reset to calculated value', changedBy: cal.moderator || cal.owner || 'Unspecified', changedAt: Date.now() };
+    update({ calibratedValue: null, history: [...history, entry], signedOffBy: null, signedOffAt: null });
   }
+
+  function confirmSignOff() {
+    if (!signerName.trim()) return;
+    update({ signedOffBy: signerName.trim(), signedOffAt: Date.now() });
+    setSigning(false);
+    setSignerName('');
+  }
+
+  function revokeSignOff() {
+    if (window.confirm('Revoke sign-off? This topic will need re-approval before it counts as finalized.')) {
+      update({ signedOffBy: null, signedOffAt: null });
+    }
+  }
+
+  const currentValue = isCalibrated ? cal.calibratedValue : calculated;
 
   return (
     <div className="rounded-xl overflow-hidden">
@@ -130,6 +167,7 @@ function CalibrationAccordionRow({ iro, isOpen, onToggle, calibration, onChange 
           <span className="text-[12.5px] font-semibold" style={{ color: pillar.text }}>{iro.name}</span>
           {flagged && <span className="text-[9.5px] font-semibold rounded-full px-2 py-0.5 border border-text-secondary text-text-secondary">Needs review</span>}
           {isCalibrated && <span className="text-[9.5px] font-semibold rounded-full px-2 py-0.5" style={{ background: '#07070B', color: '#4C6FFF' }}>Calibrated</span>}
+          {isSignedOff && <span className="text-[9.5px] font-semibold rounded-full px-2 py-0.5 flex items-center gap-1" style={{ background: '#07070B', color: '#5ED996' }}>✓ Signed off</span>}
         </div>
         <span className="text-[11px]" style={{ color: pillar.text }}>{calculated !== null ? calculated.toFixed(1) : '–'} {isOpen ? '▲' : '▼'}</span>
       </button>
@@ -145,12 +183,28 @@ function CalibrationAccordionRow({ iro, isOpen, onToggle, calibration, onChange 
 
           {iro.description && <p className="text-[12px] text-text-secondary mb-3.5">{iro.description}</p>}
 
+          {iro.sessionNotes && (
+            <div className="rounded-lg px-3 py-2.5 mb-3.5" style={{ background: 'rgba(76,111,255,0.08)', border: '1px solid rgba(76,111,255,0.2)' }}>
+              <p className="text-[10.5px] font-semibold mb-1" style={{ color: '#4C6FFF' }}>NOTES FROM THE EXPERT SESSION</p>
+              <p className="text-[12px] text-text-secondary">{iro.sessionNotes}</p>
+            </div>
+          )}
+
           <p className="text-[11.5px] text-text-secondary mb-3.5">
             {agg.overrideTriggered && 'Override triggered — severity set to maximum. '}
             {agg.discrepancy && 'High discrepancy — clarification required. '}
             Calculated: {calculated !== null ? calculated.toFixed(1) : '–'}
             {isCalibrated && <span style={{ color: '#4C6FFF' }}> · Calibrated: {cal.calibratedValue.toFixed(1)}</span>}
           </p>
+
+          {isSignedOff && (
+            <div className="rounded-lg px-3 py-2.5 mb-3.5 flex items-center justify-between" style={{ background: 'rgba(94,217,150,0.1)', border: '1px solid rgba(94,217,150,0.3)' }}>
+              <p className="text-[11.5px]" style={{ color: '#5ED996' }}>
+                ✓ Signed off by <b>{cal.signedOffBy}</b> at {currentValue !== null ? currentValue.toFixed(1) : '–'} · {new Date(cal.signedOffAt).toLocaleDateString()}
+              </p>
+              <button onClick={revokeSignOff} className="text-[11px] text-text-secondary hover:text-text-primary shrink-0">Revoke</button>
+            </div>
+          )}
 
           {flagged && (
             <div className="grid grid-cols-2 gap-3 mb-3.5">
@@ -191,23 +245,59 @@ function CalibrationAccordionRow({ iro, isOpen, onToggle, calibration, onChange 
             </div>
           )}
 
-          {cal.notes && !adjusting && (
-            <div className="bg-app-black rounded-lg px-3 py-2 mb-3">
-              <p className="text-[10.5px] text-text-secondary mb-0.5">NOTES</p>
-              <p className="text-[12px]">{cal.notes}</p>
+          {history.length > 0 && (
+            <div className="mb-3.5">
+              <p className="text-[10.5px] font-semibold text-text-secondary mb-2">CHANGE HISTORY</p>
+              <div className="flex flex-col gap-2">
+                {[...history].reverse().map((h, i) => (
+                  <div key={i} className="bg-app-black rounded-lg px-3 py-2.5">
+                    <div className="flex items-center gap-2 text-[12px] mb-1">
+                      <span className="text-text-secondary">{h.fromValue !== null && h.fromValue !== undefined ? h.fromValue.toFixed(1) : '–'}</span>
+                      <span className="text-text-secondary">→</span>
+                      <span className="font-semibold" style={{ color: '#4C6FFF' }}>{h.toValue.toFixed(1)}</span>
+                      <span className="text-[10px] text-text-secondary ml-auto">{new Date(h.changedAt).toLocaleString()}</span>
+                    </div>
+                    {h.notes && <p className="text-[11.5px] text-text-secondary">{h.notes}</p>}
+                    <p className="text-[10.5px] text-text-secondary mt-1">Changed by {h.changedBy}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
-          {!adjusting ? (
-            <div className="flex gap-2">
-              <button onClick={openAdjust} className="text-[12px] border border-border-apus rounded-lg px-3 py-1.5">
+          {!adjusting && !signing ? (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={openAdjust} disabled={isSignedOff} className="text-[12px] border border-border-apus rounded-lg px-3 py-1.5 disabled:opacity-40">
                 {isCalibrated ? 'Edit calibration' : 'Adjust this topic'}
               </button>
               {isCalibrated && (
-                <button onClick={resetToCalculated} className="text-[12px] text-text-secondary px-3 py-1.5">
+                <button onClick={resetToCalculated} disabled={isSignedOff} className="text-[12px] text-text-secondary px-3 py-1.5 disabled:opacity-40">
                   ↺ Reset to calculated
                 </button>
               )}
+              {!isSignedOff && (
+                <button onClick={() => setSigning(true)} className="text-[12px] font-semibold rounded-lg px-3 py-1.5 ml-auto" style={{ background: '#5ED996', color: '#07070B' }}>
+                  ✓ Sign off this result
+                </button>
+              )}
+            </div>
+          ) : signing ? (
+            <div className="bg-app-black rounded-xl p-4">
+              <p className="text-[11.5px] text-text-secondary mb-2.5">
+                This confirms the result at <b className="text-text-primary">{currentValue !== null ? currentValue.toFixed(1) : '–'}</b> is approved as final. Editing or resetting the calibration later will revoke this sign-off automatically.
+              </p>
+              <p className="text-[10.5px] text-text-secondary mb-1">YOUR NAME (real sign-in comes later)</p>
+              <input
+                value={signerName} onChange={(e) => setSignerName(e.target.value)}
+                placeholder="Full name" autoFocus
+                className="w-full bg-surface-2 rounded-lg px-3 py-2 text-[12.5px] outline-none mb-3"
+              />
+              <div className="flex gap-2">
+                <button onClick={confirmSignOff} disabled={!signerName.trim()} className="text-[12px] font-semibold rounded-lg px-3 py-1.5 disabled:opacity-40" style={{ background: '#5ED996', color: '#07070B' }}>
+                  Confirm sign-off
+                </button>
+                <button onClick={() => setSigning(false)} className="text-[12px] text-text-secondary px-3 py-1.5">Cancel</button>
+              </div>
             </div>
           ) : (
             <div className="bg-app-black rounded-xl p-4">

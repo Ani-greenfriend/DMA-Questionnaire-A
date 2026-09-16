@@ -3,7 +3,7 @@
 ## Identity
 A public, no-login web page where one external stakeholder rates a set of ESRS double-materiality IROs for one assessment, one topic per page.
 Tier: 2 — persists to Supabase, no login required (D3+A1)
-Spec version governed: v1.0 — the version of docs/product-spec.md these rules were derived from.
+Spec version governed: v1.1 — the version of docs/product-spec.md these rules were derived from.
 Position: Tool A of 2 in the greenfriend-dma stack — shares the Supabase project with Apus DMA — Consultant Console; this tool creates the schema.
 
 ## Session Protocol
@@ -52,13 +52,15 @@ Build this schema — authoritative until docs/supabase-setup.md exists:
 assessments: id, name, description, mode (text: 'quantitative'|'qualitative'), perspective_filter (text: 'full'|'impact'|'financial'), status, start_date, end_date, slug, logo_url, welcome_text, task_text, mandatory (bool), created_at
 iros: id, assessment_id (FK → assessments), esrs_topic_id, subtopic_raw, name, description, iro_type (text: 'neg_impact'|'pos_impact'|'risk'|'opportunity'), actual (bool), impact_threshold, financial_threshold, order, created_at
 ratings: id, assessment_id (FK → assessments), iro_id (FK → iros), criterion_key (text: 'scale'|'scope'|'irreversibility'|'likelihood'|'magnitude'|'financialLikelihood'), value (int, nullable — null means skipped), stakeholder_group, session_id, submitted_at
+session_comments: id, assessment_id (FK → assessments), session_id, comment (text), submitted_at
 
-Note: `assessments` and `iros` are written by the Consultant Console (Tool B) — this tool only reads them. This tool owns writes to `ratings`.
+Note: `assessments` and `iros` are written by the Consultant Console (Tool B) — this tool only reads them. This tool owns writes to `ratings` and `session_comments`.
 
 RLS — build these policies, never skip:
 assessments: anon can select the single row matching the assessment being viewed (by slug), no insert/update/delete.
 iros: anon can select rows where assessment_id matches the assessment being viewed, no insert/update/delete.
 ratings: anon can insert rows scoped to the assessment being viewed, no select/update/delete from this side.
+session_comments: anon can insert rows scoped to the assessment being viewed, no select/update/delete from this side.
 
 After setup, write docs/supabase-setup.md and update it at every save point that touches the database. It must contain: project name, project ID, project URL, plan, every table with field names and types, RLS policies per table, notes for future sessions, and a last-updated line with date and session number. From the moment it exists, that file is the schema source of truth.
 
@@ -66,8 +68,8 @@ After setup, write docs/supabase-setup.md and update it at every save point that
 - API keys never in any frontend file or GitHub commit. This tool only uses the browser-safe anon key.
 - Netlify Identity: never. Supabase Auth is the only authentication system in this stack (not used directly by this tool, but the rule holds across the stack).
 - RLS: never disabled on any table. If a query fails, fix the policy or the query — never disable RLS to work around it.
-- This tool shares a Supabase project with Apus DMA — Consultant Console. Protected tables — assessor_ratings, calibrations, participants, stakeholder_options — must not be modified by this tool: no schema changes, no RLS changes, no writes. Read stakeholder_options only, as documented in docs/supabase-setup.md, to render the Stakeholder Group screen.
-- Port `reference-prototype/src/components/ParticipantExperience.jsx` and `reference-prototype/src/components/ApusLogoLight.jsx` faithfully — that code is authoritative for layout, copy, spacing, colour, and interaction detail. Do not redesign from prose.
+- This tool shares a Supabase project with Apus DMA — Consultant Console. Protected tables — assessor_ratings, calibrations, calibration_history, participants, stakeholder_groups, stakeholder_members, topic_library — must not be modified by this tool: no schema changes, no RLS changes, no writes. Read stakeholder_groups/stakeholder_members only, as documented in docs/supabase-setup.md, to render the Stakeholder Group screen.
+- Port `reference-prototype/src/components/ParticipantExperience.jsx` and `reference-prototype/src/components/ApusLogoLight.jsx` faithfully — that code is authoritative for layout, copy, spacing, colour, and interaction detail. Do not redesign from prose. This includes the logo hierarchy: the client company's logo (or its placeholder) is the prominent brand shown at the top of every screen — the Apus mark is a small "Hosted on" credit at the page bottom only, never the prominent header.
 
 ## Project Structure
 ```
@@ -87,14 +89,15 @@ No brand skill yet. These inline rules apply until one is added to the repo:
 - Accent: #1F9A63 (primary buttons, selected states, progress bar)
 - Font: Inter (body), Jost (wordmark only)
 - Rounded corners: 24px on cards, 16px on buttons/inputs. Soft shadows only, no hard borders except the 1px #EFEFEC card border.
-- Logo: the Apus swift icon, dark-on-light variant, centered at the top of every screen.
+- Logo hierarchy: the client company's logo is the prominent brand at the top of every screen (or a dashed-border placeholder if none is uploaded yet). The Apus swift icon, dark-on-light variant, appears only as a small, muted "Hosted on" credit at the very bottom of the page.
 
 ## Business Rules
 - One topic per page; every applicable criterion for that IRO's type is shown stacked on the same page (neg_impact: 4 criteria; pos_impact: 3; risk/opportunity: 2 each).
 - Each criterion can be answered (0–5) or explicitly skipped — skipping is reversible ("Answer instead"). A skipped criterion is stored as `value = null`, never omitted as a row.
 - "Next topic" stays disabled while `assessments.mandatory = true` and any criterion on the page is neither answered nor skipped.
 - Stakeholder Group is a single-select, required before the first topic page.
-- On Submit, write one `ratings` row per (topic × criterion) shown, tagged with the session's chosen `stakeholder_group` and a client-generated `session_id`.
+- The Submit screen includes an optional "Any other comments?" free-text field, positioned above the Submit button.
+- On Submit, write one `ratings` row per (topic × criterion) shown, tagged with the session's chosen `stakeholder_group` and a client-generated `session_id`; write one `session_comments` row if the comment field was filled in.
 - No calculation of any kind happens in this tool — severity, scores, and materiality are Tool B's job, reading this tool's `ratings` rows.
 
 Out of scope — do not build:
@@ -102,6 +105,7 @@ Out of scope — do not build:
 - PDF/CSV export of raw responses
 - Multi-language support
 - Autosave of in-progress answers before Submit
+- Admin-facing display of the `session_comments` field — it is captured and stored here, but nothing in Tool B currently surfaces it
 
 ## Reference Docs
 Read before building the related part:

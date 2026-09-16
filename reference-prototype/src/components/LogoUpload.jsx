@@ -12,7 +12,7 @@ export default function LogoUpload({ logo, onChange }) {
 
   return (
     <div>
-      <p className="text-[11px] text-text-secondary mb-1.5">COMPANY LOGO (shown on the questionnaire)</p>
+      <p className="text-[11px] text-text-secondary mb-1.5">COMPANY LOGO <span className="opacity-60">(optional — shown on the questionnaire)</span></p>
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}

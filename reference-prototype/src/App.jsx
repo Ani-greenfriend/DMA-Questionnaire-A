@@ -5,21 +5,26 @@ import AssessmentOverview from './components/AssessmentOverview';
 import AssessmentModeSelect from './components/AssessmentModeSelect';
 import PerspectiveSelect from './components/PerspectiveSelect';
 import SurveySetupStep from './components/SurveySetupStep';
-import CsvUploadStep from './components/CsvUploadStep';
 import SetupReviewStep, { DEFAULT_WELCOME, QUAL_EXPERT_WELCOME, IMPACT_TASK, FINANCIAL_TASK, DEFAULT_STAKEHOLDERS } from './components/SetupReviewStep';
+import RecipientsScreen from './components/RecipientsScreen';
 import ExpertAssessmentCreated from './components/ExpertAssessmentCreated';
+import StakeholderModule, { GENERIC_POOL_SUGGESTIONS } from './components/StakeholderModule';
+import TopicsModule from './components/TopicsModule';
+import WizardBreadcrumb from './components/WizardBreadcrumb';
 import IntroFlow from './components/IntroFlow';
-import ParticipantExperience from './components/ParticipantExperience';
+import AssessmentReviewHub from './components/AssessmentReviewHub';
 import Questionnaire from './components/Questionnaire';
 import QuantAssessmentGrid from './components/QuantAssessmentGrid';
 import CalibrationScreen from './components/CalibrationScreen';
 import ResultsScreen from './components/ResultsScreen';
 import DmaMascot from './components/DmaMascot';
-import { DashboardIcon, AssessmentIcon, CalibrationIcon, ResultsIcon, CollapseIcon } from './components/icons';
+import { DashboardIcon, StakeholderIcon, TopicsIcon, AssessmentIcon, CalibrationIcon, ResultsIcon, CollapseIcon } from './components/icons';
 import { hasImpactAxis } from './lib/calc';
 
 const TABS = [
   { key: 'Dashboard', icon: DashboardIcon },
+  { key: 'Stakeholders', icon: StakeholderIcon },
+  { key: 'Topics', icon: TopicsIcon },
   { key: 'Assessment', icon: AssessmentIcon },
   { key: 'Calibration', icon: CalibrationIcon },
   { key: 'Results', icon: ResultsIcon },
@@ -43,6 +48,47 @@ export default function App() {
   const [taskText, setTaskText] = useState(IMPACT_TASK);
   const [stakeholders, setStakeholders] = useState(DEFAULT_STAKEHOLDERS);
   const [participants, setParticipants] = useState([]);
+  const [stakeholderMap, setStakeholderMap] = useState(() => [
+    ...DEFAULT_STAKEHOLDERS.impact.map((name) => ({ id: crypto.randomUUID(), name, perspectives: ['impact'], members: [] })),
+    ...DEFAULT_STAKEHOLDERS.financial.map((name) => ({ id: crypto.randomUUID(), name, perspectives: ['financial'], members: [] })),
+    ...GENERIC_POOL_SUGGESTIONS.map((name) => ({ id: crypto.randomUUID(), name, perspectives: [], members: [] })),
+  ]);
+  // Topics is the one place IROs get defined now — assessments read from
+  // `iros`, which stays in sync with the library here. Existing entries keep
+  // their accumulated `assessments` (real ratings); only new library topics
+  // get a fresh empty one. Nothing is ever removed from `iros` this way, so
+  // a topic pulled out of the library mid-engagement doesn't destroy ratings
+  // already collected against it.
+  // Lets any screen say "send me to X, but let me get back to where I was" —
+  // used by the Recipients screen's "add more stakeholders" link so jumping
+  // to fix something in a different tab never loses your place in the wizard.
+  const [returnTarget, setReturnTarget] = useState(null);
+  // Lifted out of StakeholderModule so the sidebar nav click can reset it —
+  // otherwise clicking "Stakeholders" while inside a specific group's
+  // contact list would silently leave you stuck there.
+  const [openGroupId, setOpenGroupId] = useState(null);
+  const [topicLibrary, setTopicLibrary] = useState([]);
+  useEffect(() => {
+    setIros((prevIros) => {
+      const byId = new Map(prevIros.map((i) => [i.id, i]));
+      return topicLibrary.map((t) => {
+        const existing = byId.get(t.id);
+        return {
+          id: t.id,
+          topic: t.esrsTopicId,
+          name: t.shortTitle,
+          description: t.description,
+          iroType: t.iroType,
+          actual: t.actual,
+          impactThreshold: 3.0,
+          financialThreshold: 3.0,
+          assessments: existing?.assessments || [],
+          sessionNotes: existing?.sessionNotes,
+        };
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicLibrary]);
   const [topicOverrides, setTopicOverrides] = useState({});
   const [mandatory, setMandatory] = useState(false);
   const [adjustingId, setAdjustingId] = useState(null);
@@ -71,8 +117,25 @@ export default function App() {
     setAdjustingId(null);
     setSurveyMeta({});
     setTopicOverrides({});
-    setStakeholders(DEFAULT_STAKEHOLDERS);
-    setParticipants([]);
+    // New assessments start from the master Stakeholder map, not a hardcoded
+    // default — whatever is currently assigned to Impact/Financial there is
+    // exactly what should be offered to participants here, since re-typing
+    // "Employees, Suppliers, ..." for every new assessment defeats the point
+    // of keeping one master map. The consultant can still add/remove entries
+    // for this specific assessment in Review & Customize without touching
+    // the master map itself.
+    setStakeholders({
+      impact: stakeholderMap.filter((g) => g.perspectives.includes('impact')).map((g) => g.name),
+      financial: stakeholderMap.filter((g) => g.perspectives.includes('financial')).map((g) => g.name),
+    });
+    // A qualitative session's expert list starts from real named contacts
+    // already captured on the master map, not a blank form — the expert
+    // topic defaults to whichever stakeholder group they belong to.
+    setParticipants(
+      stakeholderMap
+        .filter((g) => g.perspectives.length > 0)
+        .flatMap((g) => g.members.map((m) => ({ name: m.name, title: m.title, topic: g.name })))
+    );
     setFlowStep('mode');
   }
 
@@ -104,11 +167,12 @@ export default function App() {
       setTopicOverrides(assessment.config.topicOverrides || {});
       setMandatory(assessment.config.mandatory || false);
     }
-    if (assessment.mode === 'quantitative') {
-      setFlowStep('preview');
-    } else {
-      enterLiveSession(assessment.id);
-    }
+    setAdjustingId(assessment.id);
+    setFlowStep('review-hub');
+  }
+
+  function deleteAssessment(assessment) {
+    setAssessments((prev) => prev.filter((a) => a.id !== assessment.id));
   }
 
   // Real cross-tab handoff: a submission written by the preview window (a
@@ -173,6 +237,16 @@ export default function App() {
   function onPerspectiveSelected(p) {
     setPerspectiveFilter(p);
     setTaskText(p === 'financial' ? FINANCIAL_TASK : IMPACT_TASK);
+    // Re-derive the qualitative expert list now that we actually know the
+    // scope — an Impact-only session shouldn't be pre-filled with people
+    // who were only ever relevant from the Financial side, and vice versa.
+    if (assessmentMode === 'qualitative') {
+      setParticipants(
+        stakeholderMap
+          .filter((g) => (p === 'full' ? g.perspectives.length > 0 : g.perspectives.includes(p)))
+          .flatMap((g) => g.members.map((m) => ({ name: m.name, title: m.title, topic: g.name })))
+      );
+    }
     saveDraft({
       name: 'Untitled draft',
       type: `${assessmentMode === 'quantitative' ? 'Quantitative' : 'Qualitative'} — ${PERSPECTIVE_LABEL[p]}`,
@@ -189,14 +263,9 @@ export default function App() {
       link: meta.slug ? `apus.app/survey/${meta.slug}` : undefined,
       startDate: meta.startDate,
       endDate: meta.endDate,
+      iroIds: iros.filter((i) => (perspectiveFilter === 'impact' ? hasImpactAxis(i.iroType) : perspectiveFilter === 'financial' ? !hasImpactAxis(i.iroType) : true)).map((i) => i.id),
     });
-    setFlowStep('upload');
-  }
-
-  function onCsvLoaded(loaded) {
-    setIros(loaded);
     setTopicOverrides({});
-    saveDraft({ iroIds: loaded.map((i) => i.id) });
     setFlowStep('review');
   }
 
@@ -212,24 +281,39 @@ export default function App() {
   }, [welcomeText, taskText, stakeholders, participants, topicOverrides, mandatory]);
 
   function onCreateQuestionnaire() {
+    const relevantIros = iros.filter((i) => (
+      perspectiveFilter === 'impact' ? hasImpactAxis(i.iroType) : perspectiveFilter === 'financial' ? !hasImpactAxis(i.iroType) : true
+    ));
+    // Only the setup/config fields below — editing an already-completed
+    // assessment must never silently reset its respondent count or status
+    // back to "not yet run." Those only change when a real session runs.
     const record = {
       name: surveyMeta.name || 'Untitled survey',
       type: `${assessmentMode === 'quantitative' ? 'Quantitative' : 'Qualitative'} — ${PERSPECTIVE_LABEL[perspectiveFilter]}`,
-      respondents: '0/?',
       mode: assessmentMode,
       perspectiveFilter,
       link: `apus.app/survey/${surveyMeta.slug}`,
       startDate: surveyMeta.startDate,
       endDate: surveyMeta.endDate,
-      iroIds: iros.map((i) => i.id),
+      iroIds: relevantIros.map((i) => i.id),
       config: { surveyMeta, welcomeText, taskText, stakeholders, participants, topicOverrides, mandatory },
-      status: undefined, // clears any leftover 'Draft' status so date-based computation takes over for quant
     };
     if (adjustingId) {
-      setAssessments((prev) => prev.map((a) => (a.id === adjustingId ? { ...a, ...record, updatedAt: Date.now() } : a)));
+      // adjustingId is set both for a genuine re-edit of something already
+      // run AND for the auto-saved draft of a brand-new assessment (saveDraft
+      // assigns an id before Create is ever clicked) — those two need
+      // different treatment. Only a real prior run should keep its
+      // respondents/status; a still-draft record resets them exactly like a
+      // fresh creation, so the Draft → Scheduled/Active transition still
+      // happens the first time this assessment is actually created.
+      const existing = assessments.find((a) => a.id === adjustingId);
+      const wasGenuinelyRun = existing && existing.respondents !== '0/?';
+      setAssessments((prev) => prev.map((a) => (a.id === adjustingId
+        ? { ...a, ...record, updatedAt: Date.now(), ...(wasGenuinelyRun ? {} : { respondents: '0/?', status: undefined }) }
+        : a)));
     } else {
       const newId = crypto.randomUUID();
-      setAssessments((prev) => [...prev, { ...record, id: newId, createdAt: Date.now() }]);
+      setAssessments((prev) => [...prev, { ...record, respondents: '0/?', status: undefined, id: newId, createdAt: Date.now() }]);
       // So that actually running the qualitative session afterwards updates
       // this record instead of creating a duplicate on top of it.
       setAdjustingId(newId);
@@ -237,16 +321,22 @@ export default function App() {
     setFlowStep('expert-created');
   }
 
-  function finishQuestionnaire(ratings, relevantIros) {
+  function finishQuestionnaire(ratings, relevantIros, sessionNotes = {}) {
     setIros((prev) => prev.map((iro) => {
       const r = ratings[iro.id];
-      if (!r) return iro;
-      const isImpact = hasImpactAxis(iro.iroType);
-      const assessment = isImpact
-        ? { assessor: 'Live session', scale: r.scale, scope: r.scope, irreversibility: iro.iroType === 'neg_impact' ? r.irreversibility : null, likelihood: r.likelihood, magnitude: null, financialLikelihood: null }
-        : { assessor: 'Live session', scale: null, scope: null, irreversibility: null, likelihood: null, magnitude: r.magnitude, financialLikelihood: r.financialLikelihood };
-      const withoutPriorLive = iro.assessments.filter((a) => a.assessor !== 'Live session');
-      return { ...iro, assessments: [...withoutPriorLive, assessment] };
+      const note = sessionNotes[iro.id];
+      if (!r && !note) return iro;
+      let next = iro;
+      if (r) {
+        const isImpact = hasImpactAxis(iro.iroType);
+        const assessment = isImpact
+          ? { assessor: 'Live session', scale: r.scale, scope: r.scope, irreversibility: iro.iroType === 'neg_impact' ? r.irreversibility : null, likelihood: r.likelihood, magnitude: null, financialLikelihood: null }
+          : { assessor: 'Live session', scale: null, scope: null, irreversibility: null, likelihood: null, magnitude: r.magnitude, financialLikelihood: r.financialLikelihood };
+        const withoutPriorLive = iro.assessments.filter((a) => a.assessor !== 'Live session');
+        next = { ...next, assessments: [...withoutPriorLive, assessment] };
+      }
+      if (note) next = { ...next, sessionNotes: note };
+      return next;
     }));
 
     if (adjustingId) {
@@ -283,30 +373,23 @@ export default function App() {
     setTab('Calibration');
   }
 
-  // Preview stays inside this tool — a full white-page takeover of the same
-  // window, not a new tab. A banner + "Back to setup" makes it unmistakably
-  // a preview, never confusable with the external participant link.
-  if (tab === 'Assessment' && flowStep === 'preview') {
-    return (
-      <ParticipantExperience
-        mode={assessmentMode} perspectiveFilter={perspectiveFilter} iros={iros}
-        welcomeText={welcomeText} stakeholders={stakeholders}
-        topicOverrides={topicOverrides} logo={surveyMeta.logo} companyName={surveyMeta.name}
-        previewBanner
-        onExitPreview={() => setFlowStep('overview')}
-        onSubmit={() => {}}
-      />
-    );
-  }
-
   return (
     <div
       className="min-h-screen flex"
       style={{
         backgroundColor: '#07070B',
-        backgroundImage: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(76,111,255,0.06), transparent 60%)',
+        backgroundImage: 'radial-gradient(ellipse 70% 45% at 50% -5%, rgba(76,111,255,0.14), transparent 60%), radial-gradient(ellipse 50% 35% at 100% 20%, rgba(94,217,150,0.05), transparent 55%)',
       }}
     >
+      {returnTarget && (
+        <button
+          onClick={() => { setTab('Assessment'); setFlowStep(returnTarget); setReturnTarget(null); }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full px-5 py-3 text-[12.5px] font-semibold shadow-2xl"
+          style={{ background: '#4C6FFF', color: '#F5F6FA' }}
+        >
+          ← Back to where you left off
+        </button>
+      )}
       <aside
         className="border-r border-border-apus flex flex-col py-5 shrink-0 transition-all duration-200 relative overflow-hidden"
         style={{
@@ -347,6 +430,9 @@ export default function App() {
                 // back into Assessment should land you exactly where you left it.
                 const midSession = flowStep === 'questionnaire' || flowStep === 'intro';
                 if (key === 'Assessment' && !midSession) setFlowStep('overview');
+                // Clicking "Stakeholders" always returns to the group overview,
+                // even if you were mid-way through a specific group's contacts.
+                if (key === 'Stakeholders') setOpenGroupId(null);
               }}
               title={key}
               className={`flex items-center gap-3 text-[13px] font-medium px-3 py-2.5 rounded-lg transition-colors ${tab === key ? 'bg-emerald text-app-black' : 'text-text-primary hover:bg-surface'}`}
@@ -368,15 +454,56 @@ export default function App() {
           {tab === 'Dashboard' && (
             <Dashboard
               iros={iros} assessments={assessments} calibrations={calibrations}
-              onGoToAssessment={() => { setTab('Assessment'); setFlowStep(assessments.length === 0 ? 'mode' : 'overview'); }}
+              stakeholderMap={stakeholderMap} topicLibrary={topicLibrary}
+              onGoToAssessment={() => setTab('Stakeholders')}
+              onNavigate={(step) => {
+                if (step === 'stakeholders') setTab('Stakeholders');
+                else if (step === 'topics') setTab('Topics');
+                else if (step === 'calibration') setTab('Calibration');
+                else if (step === 'results') setTab('Results');
+                else { setTab('Assessment'); setFlowStep(assessments.length === 0 ? 'mode' : 'overview'); }
+              }}
             />
+          )}
+
+          {tab === 'Stakeholders' && (
+            <StakeholderModule
+              stakeholderMap={stakeholderMap} setStakeholderMap={setStakeholderMap}
+              openGroupId={openGroupId} setOpenGroupId={setOpenGroupId}
+              onGoNext={() => setTab('Topics')}
+            />
+          )}
+
+          {tab === 'Topics' && (
+            <TopicsModule topicLibrary={topicLibrary} setTopicLibrary={setTopicLibrary} onGoNext={() => { setTab('Assessment'); setFlowStep('mode'); }} />
           )}
 
           {tab === 'Assessment' && flowStep === 'overview' && (
             <AssessmentOverview
               assessments={assessments} onNew={startNewAssessment} onEdit={editAssessmentSetup}
-              onPreview={previewAssessment} onViewResults={() => setTab('Results')}
+              onPreview={previewAssessment} onViewResults={() => setTab('Results')} onDelete={deleteAssessment}
             />
+          )}
+          {tab === 'Assessment' && flowStep === 'review-hub' && (
+            <AssessmentReviewHub
+              mode={assessmentMode} perspectiveFilter={perspectiveFilter} iros={iros}
+              logo={surveyMeta.logo} companyName={surveyMeta.name}
+              welcomeText={welcomeText} taskText={taskText} stakeholders={stakeholders} topicOverrides={topicOverrides}
+              onSaveAndExit={(updated) => {
+                setWelcomeText(updated.welcomeText);
+                setTaskText(updated.taskText);
+                setStakeholders(updated.stakeholders);
+                setTopicOverrides(updated.topicOverrides);
+                setAssessments((prev) => prev.map((a) => (a.id === adjustingId
+                  ? { ...a, config: { ...a.config, welcomeText: updated.welcomeText, taskText: updated.taskText, stakeholders: updated.stakeholders, topicOverrides: updated.topicOverrides } }
+                  : a)));
+                setFlowStep('overview');
+              }}
+              onDiscardAndExit={() => setFlowStep('overview')}
+            />
+          )}
+          {tab === 'Assessment' && ['mode', 'perspective', 'survey-details', 'review', 'recipients'].includes(flowStep) && (
+            <WizardBreadcrumb flowStep={flowStep} onJump={(step) => setFlowStep(step)} />
           )}
           {tab === 'Assessment' && flowStep === 'mode' && (
             <AssessmentModeSelect onSelect={onModeSelected} />
@@ -395,12 +522,6 @@ export default function App() {
               onBack={() => setFlowStep('perspective')}
             />
           )}
-          {tab === 'Assessment' && flowStep === 'upload' && (
-            <div>
-              <button onClick={() => setFlowStep('survey-details')} className="text-[11.5px] text-text-secondary mb-4">← Back</button>
-              <CsvUploadStep onLoaded={onCsvLoaded} />
-            </div>
-          )}
           {tab === 'Assessment' && flowStep === 'review' && (
             <SetupReviewStep
               mode={assessmentMode}
@@ -411,10 +532,24 @@ export default function App() {
               taskText={taskText} setTaskText={setTaskText}
               stakeholders={stakeholders} setStakeholders={setStakeholders}
               participants={participants} setParticipants={setParticipants}
+              stakeholderMap={stakeholderMap} setStakeholderMap={setStakeholderMap}
               topicOverrides={topicOverrides} setTopicOverrides={setTopicOverrides}
               mandatory={mandatory} setMandatory={setMandatory}
               onBack={() => setFlowStep('survey-details')}
-              onCreate={onCreateQuestionnaire}
+              onCreate={() => setFlowStep('recipients')}
+            />
+          )}
+          {tab === 'Assessment' && flowStep === 'recipients' && (
+            <RecipientsScreen
+              mode={assessmentMode} stakeholders={stakeholders} stakeholderMap={stakeholderMap}
+              onBack={() => setFlowStep('review')}
+              onGoToStakeholders={() => { setReturnTarget('recipients'); setTab('Stakeholders'); }}
+              onContinue={(includedPeople) => {
+                if (assessmentMode === 'qualitative') {
+                  setParticipants(includedPeople.map((p) => ({ name: p.name, title: p.title, topic: p.groupName })));
+                }
+                onCreateQuestionnaire();
+              }}
             />
           )}
           {tab === 'Assessment' && flowStep === 'expert-created' && (
@@ -424,9 +559,10 @@ export default function App() {
               startDate={surveyMeta.startDate}
               endDate={surveyMeta.endDate}
               link={`apus.app/survey/${surveyMeta.slug}`}
+              alreadyRun={!!adjustingId && assessments.find((a) => a.id === adjustingId)?.respondents !== '0/?'}
               onCopy={() => navigator.clipboard?.writeText(`apus.app/survey/${surveyMeta.slug}`).catch(() => {})}
               onPreview={() => {
-                if (assessmentMode === 'quantitative') setFlowStep('preview');
+                if (assessmentMode === 'quantitative') setFlowStep('review-hub');
               }}
               onKickOff={() => enterLiveSession(adjustingId)}
               onGoToOverview={() => setFlowStep('overview')}

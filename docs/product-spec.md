@@ -1,7 +1,7 @@
 # Product Spec — Apus DMA — Participant Questionnaire
 
-**Version:** 1.0
-**Date:** 2026-09-10
+**Version:** 1.1
+**Date:** 2026-09-16
 **Author:** Anika (greenfriend)
 **Status:** Confirmed
 
@@ -145,8 +145,9 @@
 | Table name | What it stores | Key fields |
 |-----------|-----------------|-----------|
 | ratings | One row per (IRO × criterion) answered or skipped, per participant session | assessment_id, iro_id, criterion_key, value, stakeholder_group, session_id, submitted_at |
+| session_comments | One row per participant session's optional free-text "Any other comments?" field, captured on Submit | id, assessment_id, session_id, comment, submitted_at |
 
-> `iros` (the topic list itself) and `assessments` (the survey record) are owned and written by Tool B — see that spec's Section 5. This tool only reads them (to render the questionnaire) and writes `ratings`.
+> `iros` (the topic list itself) and `assessments` (the survey record) are owned and written by Tool B — see that spec's Section 5. This tool only reads them (to render the questionnaire) and writes `ratings` and `session_comments`.
 
 **File storage:** No — the only file involved (company logo) is uploaded by the consultant in Tool B and read here as a URL.
 
@@ -165,6 +166,7 @@ Not applicable — no authentication on this tool (A1).
 | assessments | Unauthenticated (anon) | Own assessment only, via its link/slug | No | No | No |
 | iros | Unauthenticated (anon) | Rows belonging to the assessment being viewed | No | No | No |
 | ratings | Unauthenticated (anon) | No (write-only from this side) | Yes — scoped to the assessment being viewed | No | No |
+| session_comments | Unauthenticated (anon) | No (write-only from this side) | Yes — scoped to the assessment being viewed | No | No |
 
 ---
 
@@ -180,7 +182,7 @@ Verified against the built `ParticipantExperience.jsx` component.
 
 ### Welcome
 - **Purpose:** Introduce the survey and set expectations before any question is asked.
-- **What is visible:** Company logo if provided (else a plant emoji), a title ("[Company name] sustainability survey" or "Sustainability survey" if no company name was set), the consultant-edited welcome text, and three fixed bullets — "Fully anonymous — no answer can be traced back to you," "About 15–20 minutes," "Not sure about something? Every question can be skipped."
+- **What is visible:** The **client company's own logo, prominently centered at the top of every screen in the survey** (not just the Welcome card) — or, if none has been uploaded yet, a clear dashed-border placeholder box signalling where it will appear once set in Tool B; a title ("[Company name] sustainability survey" or "Sustainability survey" if no company name was set), the consultant-edited welcome text, and three fixed bullets — "Fully anonymous — no answer can be traced back to you," "About 15–20 minutes," "Not sure about something? Every question can be skipped." The Apus mark itself is demoted to a small, muted "Hosted on ✈ apus" credit at the very bottom of the page — the client sending the survey is the prominent brand, Apus is the host, not the sender.
 - **User actions:** Click "Get started →"
 - **What happens next:** Moves to Rating Criteria.
 
@@ -203,10 +205,10 @@ Verified against the built `ParticipantExperience.jsx` component.
 - **What happens next:** "Next topic →" (or "Continue →" on the last topic) is disabled until every criterion on the page has a value or is explicitly skipped. Advancing past the last topic moves to Submit.
 
 ### Submit
-- **Purpose:** A final confirmation step before anything is sent.
-- **What is visible:** "That's everything"; a note that "Previous" can still be used to review answers.
-- **User actions:** Click "Submit survey →"
-- **What happens next:** Writes every answered/skipped row to the `ratings` table, tagged with the session's `stakeholder_group`, then moves to Thank you.
+- **Purpose:** A final confirmation step before anything is sent, plus a chance to add anything not covered by the structured questions.
+- **What is visible:** "That's everything"; a note that "Previous" can still be used to review answers; an **"Any other comments?"** free-text textarea (optional, labeled "anything you didn't get to say above, or context you think matters") positioned directly above the Submit button.
+- **User actions:** Type an optional comment; click "Submit survey →"
+- **What happens next:** Writes every answered/skipped row to the `ratings` table, tagged with the session's `stakeholder_group`, writes the comment text (if any) to `session_comments` — see Section 5 — then moves to Thank you.
 
 ### Thank you
 - **Purpose:** Close the loop for the participant.
@@ -229,7 +231,7 @@ None. This tool performs no calculation — it captures a `value` (0–5) or `nu
 - **Primary text:** `#111318`; secondary text: `#5B5B66` / `#6B6B76` / `#8A8A94`
 - **Primary action colour:** `#1F9A63` (a slightly deeper emerald than the admin tool's `#5ED996`, chosen for AA-contrast on white)
 - **Font:** Inter (body), Jost (wordmark) — same as the admin tool
-- **Logo:** Apus swift icon in a dark-on-light variant (`ApusLogoLight`), centered at the top of every screen; the client's own logo (if supplied) appears inside the Welcome card, not in place of the Apus mark
+- **Logo:** The client company's logo is the prominent brand shown at the top of every screen in the survey (not the Apus mark) — see the Welcome screen entry above. The Apus swift icon (`ApusLogoLight`, dark-on-light variant) appears only as a small "Hosted on" credit at the bottom of the page.
 
 **Visual feel:** Clean, warm, and welcoming — generous white space, rounded 24px cards, soft shadows. Intentionally reads as a standalone, professional survey product, not as "a screen inside someone else's internal tool."
 
@@ -322,6 +324,7 @@ No other external service is used by this tool.
 | Version | Date | What changed in the tool |
 |---------|------|------------------------------|
 | v1.0 | 2026-09-10 | Initial build — documents the working React/Vite prototype's participant-facing flow (Welcome → Rating Criteria → Stakeholder Group → one-topic-per-page rating with per-criterion skip → Submit → Thank you). |
+| v1.1 | 2026-09-16 | The client company's own logo (uploaded in Tool B) is now the prominent brand shown at the top of every screen — previously it only appeared inside the Welcome card while the Apus mark was the prominent header everywhere; Apus is now a small "Hosted on" credit at the page bottom instead. Added an optional "Any other comments?" free-text field on the Submit screen, written to a new `session_comments` table. |
 
 ---
 

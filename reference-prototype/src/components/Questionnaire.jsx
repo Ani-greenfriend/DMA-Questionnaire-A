@@ -125,6 +125,7 @@ export default function Questionnaire({
       : {}
   ));
   const [ratings, setRatings] = useState(initialRatings);
+  const [sessionNotes, setSessionNotes] = useState({});
   const [touched, setTouched] = useState(() => new Set(initialRatings[relevantIros[startIndex]?.id] ? Object.keys(initialRatings[relevantIros[startIndex].id]) : []));
   const [finished, setFinished] = useState(false);
 
@@ -181,7 +182,7 @@ export default function Questionnaire({
           </div>
 
           <button
-            onClick={() => onFinish(ratings, relevantIros)}
+            onClick={() => onFinish(ratings, relevantIros, sessionNotes)}
             className="text-[13px] font-semibold rounded-xl px-6 py-3"
             style={{ background: '#4C6FFF', color: '#F5F6FA' }}
           >
@@ -229,6 +230,7 @@ export default function Questionnaire({
   }
 
   function exitSession() {
+    if (!window.confirm('Exit this session?\n\nYour progress will be saved and you can resume exactly where you left off.')) return;
     const updated = { ...ratings, [iro.id]: { ...values } };
     setRatings(updated);
     onProgress?.(updated, index);
@@ -285,6 +287,16 @@ export default function Questionnaire({
         {criteria.map((c) => (
           <CriterionSlider key={c.key} label={c.label} description={c.description} labels={c.labels} value={values[c.key]} onChange={(v) => setVal(c.key, v)} color={color} />
         ))}
+
+        <div className="mb-6">
+          <p className="text-[10.5px] mb-1.5" style={{ color: '#8B8B98' }}>SESSION NOTES FOR THIS TOPIC (optional)</p>
+          <textarea
+            value={sessionNotes[iro.id] ?? ''}
+            onChange={(e) => setSessionNotes((prev) => ({ ...prev, [iro.id]: e.target.value }))}
+            placeholder="Capture anything the group discussed — context, disagreements, follow-ups…"
+            className="w-full bg-surface-2 rounded-xl px-3.5 py-3 text-[12.5px] outline-none min-h-[70px]"
+          />
+        </div>
 
         {nextBlocked && <p className="text-[11px] mb-2" style={{ color: '#D79A4C' }}>Please rate every criterion above before continuing.</p>}
         <button onClick={next} disabled={nextBlocked} className="w-full text-[13.5px] font-semibold rounded-2xl py-3.5 mt-2 disabled:opacity-40 transition-transform hover:scale-[1.01]" style={{ background: '#4C6FFF', color: '#F5F6FA', boxShadow: '0 8px 24px -6px rgba(76,111,255,0.5)' }}>
