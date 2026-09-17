@@ -1,6 +1,6 @@
 # Supabase Setup — Apus DMA — Participant Questionnaire
 
-**Last updated:** 2026-09-10 — Session 1
+**Last updated:** 2026-09-17 — Session 3
 
 ## Project
 - Name: `greenfriend Double Materiality Assessment` (existing project — reused per
@@ -68,7 +68,21 @@ Owned/written by this tool (Participant Questionnaire). Tool B reads it.
 | submitted_at | timestamptz | default `now()` |
 
 Indexes: `iros(assessment_id)`, `ratings(assessment_id)`, `ratings(iro_id)`,
-`assessments(slug)`.
+`assessments(slug)`, `session_comments(assessment_id)`.
+
+### session_comments
+Owned/written by this tool (Participant Questionnaire). Added session 3 (v1.1
+revision) — the Submit screen's optional "Any other comments?" field writes
+here. Not currently read by anything in this tool or Tool B (per CLAUDE.md,
+out of scope for now).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | default `gen_random_uuid()` |
+| assessment_id | uuid, FK → assessments.id | `on delete cascade` |
+| session_id | uuid | same client-generated session id used on `ratings` rows |
+| comment | text | not null — the app only inserts a row when the field was filled in |
+| submitted_at | timestamptz | default `now()` |
 
 ## RLS Policies
 
@@ -77,6 +91,7 @@ Indexes: `iros(assessment_id)`, `ratings(assessment_id)`, `ratings(iro_id)`,
 | assessments | `anon select assessments` | `anon` role can `select` — the app always filters by exact `slug`, so this is a point-lookup in practice, not a public listing |
 | iros | `anon select iros` | `anon` role can `select` — the app always filters by exact `assessment_id` obtained from the assessments lookup |
 | ratings | `anon insert ratings` | `anon` role can `insert` only — no select/update/delete from the anon role |
+| session_comments | `anon insert session_comments` | `anon` role can `insert` only — no select/update/delete from the anon role |
 
 No insert/update/delete policy exists on `assessments` or `iros` for `anon` — those
 tables are read-only from this tool's side, matching CLAUDE.md.

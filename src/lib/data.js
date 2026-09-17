@@ -70,3 +70,9 @@ export async function submitRatings(rows) {
   if (error) throw error;
   return { ok: true };
 }
+
+export async function submitSessionComment(row) {
+  const { error } = await supabase.from('session_comments').insert(row);
+  if (error) throw error;
+  return { ok: true };
+}

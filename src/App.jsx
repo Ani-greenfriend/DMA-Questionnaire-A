@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import ParticipantExperience, { CRITERIA_FOR } from './components/ParticipantExperience';
 import ApusLogoLight from './components/ApusLogoLight';
-import { fetchAssessmentBySlug, submitRatings } from './lib/data';
+import { fetchAssessmentBySlug, submitRatings, submitSessionComment } from './lib/data';
 
 function slugFromPath() {
   const match = window.location.pathname.match(/^\/survey\/([^/]+)\/?$/);
@@ -62,9 +62,12 @@ export default function App() {
   if (status === 'config-error') {
     return (
       <Centered>
-        <div className="flex justify-center mb-5"><ApusLogoLight height={26} /></div>
         <p className="text-[15px] font-semibold mb-1" style={{ color: '#111318' }}>Survey misconfigured</p>
-        <p className="text-[12.5px]" style={{ color: '#8A8A94' }}>{configError}</p>
+        <p className="text-[12.5px] mb-6" style={{ color: '#8A8A94' }}>{configError}</p>
+        <div className="flex items-center justify-center gap-1.5 opacity-60">
+          <span className="text-[10.5px]" style={{ color: '#8A8A94' }}>Hosted on</span>
+          <ApusLogoLight height={13} />
+        </div>
       </Centered>
     );
   }
@@ -72,16 +75,19 @@ export default function App() {
   if (status === 'not-found') {
     return (
       <Centered>
-        <div className="flex justify-center mb-5"><ApusLogoLight height={26} /></div>
         <p className="text-[15px] font-semibold mb-1" style={{ color: '#111318' }}>Survey not found</p>
-        <p className="text-[12.5px]" style={{ color: '#8A8A94' }}>
+        <p className="text-[12.5px] mb-6" style={{ color: '#8A8A94' }}>
           This link doesn't match a live assessment. Check the link you were given, or contact whoever sent it to you.
         </p>
+        <div className="flex items-center justify-center gap-1.5 opacity-60">
+          <span className="text-[10.5px]" style={{ color: '#8A8A94' }}>Hosted on</span>
+          <ApusLogoLight height={13} />
+        </div>
       </Centered>
     );
   }
 
-  const handleSubmit = (answers, relevantIros, stakeholderGroup) => {
+  const handleSubmit = (answers, relevantIros, stakeholderGroup, comment) => {
     const rows = [];
     for (const iro of relevantIros) {
       for (const c of CRITERIA_FOR[iro.iroType]) {
@@ -100,6 +106,17 @@ export default function App() {
       // eslint-disable-next-line no-console
       console.error('Failed to submit ratings:', err);
     });
+
+    if (comment && comment.trim()) {
+      submitSessionComment({
+        assessment_id: assessment.id,
+        session_id: sessionId,
+        comment: comment.trim(),
+      }).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('Failed to submit comment:', err);
+      });
+    }
   };
 
   return (
