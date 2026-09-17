@@ -5,8 +5,8 @@
 > History lives in git.
 
 **Session:** 3
-**Last updated:** 2026-09-17 — by Claude Code, closed out v1.1 revisions
-**Live URL:** not yet confirmed — no Netlify site URL recorded; builder to confirm after connecting the repo in the Netlify dashboard
+**Last updated:** 2026-09-17 — by Claude Code, closed out v1.1 revisions + fixed deploy preview env vars
+**Live URL:** production is `questionnaire-dma.netlify.app`, connected and deploying from GitHub — but still on the pre-PR-4 commit until PR #4 merges. PR #4's deploy preview (`https://deploy-preview-4--questionnaire-dma.netlify.app`) is confirmed working against live Supabase data as of this session.
 
 ## Current state
 Core participant flow is built and working against real Supabase data, and
@@ -60,9 +60,20 @@ fixed both the logo hierarchy and added the comments field in one move,
 since the reference already had both correct), and wired `App.jsx`/`data.js`
 around it — including fixing a `stakeholder`-dropping regression in the
 reference file's own `Submit` wiring, and fixing the same prominent-Apus-logo
-issue on `App.jsx`'s own error screens. Subscribed to PR #3 for CI/review
-follow-up. Build, lint, and dev-server smoke tests all pass; no full
-click-through test yet.
+issue on `App.jsx`'s own error screens. PR #3 merged mid-session (docs-only
+correction); opened PR #4 for the v1.1 work and subscribed to it.
+
+Then spent most of the session debugging why PR #4's Netlify deploy preview
+wouldn't load `acme-2026` at all — see the Known issues incident note. Root
+cause: the legacy anon JWT in Netlify's `VITE_SUPABASE_ANON_KEY` had a
+corrupted (non-ISO-8859-1) character from a copy/paste chain, which made
+`supabase-js` throw when setting the `apikey` HTTP header. Fixed by
+switching to Supabase's newer plain-ASCII publishable key. Along the way,
+added better error diagnostics to `supabaseClient.js`/`data.js` (worth
+keeping) and discovered Netlify only re-reads env vars on a fresh
+"Clear cache and deploy site," not a plain retry. The PR #4 deploy preview
+is now confirmed loading real data from Supabase. Still no full manual
+click-through of the 6-screen flow.
 
 ## Remaining work
 - [x] First Session Setup: docs/ present, product-spec.md in place
@@ -87,13 +98,20 @@ click-through test yet.
       everywhere, including `App.jsx`'s pre-load/error screens (v1.1 revision)
 - [x] Submit screen: optional "Any other comments?" field wired to
       `session_comments` (v1.1 revision)
+- [x] Netlify connected and deploying from GitHub (`questionnaire-dma.netlify.app`)
+      — was already done in an earlier session, just unconfirmed until now
+- [x] Env vars correctly set in Netlify (`VITE_SUPABASE_URL` +
+      `VITE_SUPABASE_ANON_KEY` using the publishable key) — PR #4's deploy
+      preview confirmed loading live `acme-2026` data from Supabase
 - [ ] Local test pass — full click-through of every screen (welcome through
       thank-you, including skip/answer toggling and the comment field)
-      against the `acme-2026` demo assessment before deploying
+      against the `acme-2026` demo assessment — only confirmed it loads and
+      reaches Welcome so far, not a full walkthrough
 - [ ] Acceptance criteria pass — verify every criterion in spec Section
-      "Acceptance Criteria" before deploy
-- [ ] Deploy to Netlify — no live URL confirmed yet; builder to connect repo
-      and set env vars in the Netlify dashboard
+      "Acceptance Criteria" before calling this tool done
+- [ ] Merge PR #4, which will deploy the v1.1 work + these fixes to
+      production (`questionnaire-dma.netlify.app` is still on the pre-PR-4
+      commit)
 
 ## Build decisions
 - Reused an existing Supabase project (`greenfriend Double Materiality
@@ -112,20 +130,32 @@ click-through test yet.
   rule doesn't cover them.
 
 ## Known issues
-- Netlify site not yet connected — no live URL to record.
+- **Incident, resolved this session:** Netlify's `VITE_SUPABASE_ANON_KEY` had
+  a corrupted character (non-ISO-8859-1) from a copy/paste chain, causing
+  `supabase-js` to throw `TypeError: Failed to execute 'set' on 'Headers'`
+  on every page load. Fixed by using Supabase's newer publishable key
+  (`sb_publishable_...`) instead of the legacy anon JWT — see
+  docs/supabase-setup.md's Notes section for the full writeup, including
+  the Netlify gotcha that changing an env var does nothing until you
+  specifically "Clear cache and deploy site" (a plain retry reuses the old
+  value).
+- Netlify production (`questionnaire-dma.netlify.app`) is connected and
+  auto-deploying from `main`, but is still on the pre-PR-4 commit — merge
+  PR #4 to bring it current.
 - Supabase project still on the Free plan — must be upgraded to Pro before
-  real client use (flagged in CLAUDE.md).
+  real client use (flagged in CLAUDE.md). Netlify's build-minute credit
+  limit was also hit earlier this session (production deploys were being
+  skipped) but appears to have reset on its own.
 - The prototype's `ratings` shape vs. Tool B's `assessor_ratings` table
   reconciliation (product-spec.md Section 15, Open Questions) — status
   unconfirmed this session, re-check before finalizing schema further.
-- No full click-through test yet — only build/lint/dev-server smoke tests.
-  Do this before the acceptance-criteria pass.
+- No full click-through test yet — confirmed the deploy preview loads real
+  Supabase data and reaches the Welcome screen, but haven't walked through
+  Task → Stakeholder → Questions → Submit → Thank you end-to-end.
 
 ## Notes for next session
 Priority: do the local click-through test pass (all 6 screens, skip/answer
 toggling, mandatory-gating behavior, the comments field, both with and
-without a client logo set) against the `acme-2026` demo assessment, then the
-acceptance-criteria pass from product-spec.md. After that, deploy to
-Netlify — confirm Netlify MCP status with the builder first; if inactive,
-remind them to connect the repo and set `VITE_SUPABASE_URL` /
-`VITE_SUPABASE_ANON_KEY` in the Netlify dashboard.
+without a client logo set) against the `acme-2026` demo assessment on PR
+#4's deploy preview, then the acceptance-criteria pass from product-spec.md.
+Then merge PR #4 so production picks up the v1.1 work and the env var fix.

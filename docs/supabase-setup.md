@@ -105,11 +105,33 @@ the table doesn't exist or returns no rows — see PROGRESS.md.
 
 ## Environment variables
 - `VITE_SUPABASE_URL` = `https://evwmxduudcujtibirmga.supabase.co`
-- `VITE_SUPABASE_ANON_KEY` = the legacy anon key (JWT) from Project Settings →
-  API. Set both as Netlify environment variables at deploy time; never commit
-  real values (`.env` is gitignored, `.env.example` has empty placeholders).
+- `VITE_SUPABASE_ANON_KEY` = the **publishable key** (`sb_publishable_...`),
+  not the legacy anon JWT. Both work with `@supabase/supabase-js`, but use
+  the publishable key — see the incident note below. Get it from Project
+  Settings → API Keys → Publishable key. Set both as Netlify environment
+  variables at deploy time; never commit real values (`.env` is gitignored,
+  `.env.example` has empty placeholders).
 
 ## Notes for future sessions
+- **Incident (session 3):** the deployed app showed `Survey misconfigured` /
+  `TypeError: Failed to execute 'set' on 'Headers': String contains non
+  ISO-8859-1 code point` on every load. Root cause: the legacy anon JWT
+  pasted into Netlify's `VITE_SUPABASE_ANON_KEY` had picked up a stray
+  non-Latin1 character somewhere in the copy/paste chain, and
+  `supabase-js` puts this value straight into an HTTP header (`apikey`),
+  which the browser's `Headers.set()` rejects outright for any character
+  outside ISO-8859-1. Fixed by switching to the shorter, plain-ASCII
+  **publishable key** instead of the legacy JWT — same effect, much less
+  copy/paste risk. `src/lib/supabaseClient.js` and `src/lib/data.js` also
+  gained better error surfacing (per-variable presence/length diagnostics,
+  and real Postgrest error messages instead of a flat "not found") while
+  chasing this down — those are worth keeping even though the root cause
+  turned out to be Netlify-side.
+- Netlify's env-var dashboard does **not** apply a changed value to an
+  already-built deploy — even "Retry deploy" on an existing deploy entry
+  reused the old value. Only **"Clear cache and deploy site"** on a fresh
+  deploy action actually re-reads current env vars. Worth remembering for
+  any future "I changed the env var but nothing happened" report.
 - This session's sandbox could not reach `*.supabase.co` directly (organization
   egress policy blocks it for direct HTTPS/browser traffic) — schema changes went
   through fine via the Supabase MCP tool, but a live browser test of the deployed
