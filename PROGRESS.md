@@ -5,47 +5,75 @@
 > History lives in git.
 
 **Session:** 3
-**Last updated:** 2026-09-17 — by Claude Code, correcting stale status
-**Live URL:** not yet confirmed — no Netlify site URL recorded; builder to confirm after connecting the repo in the Netlify dashboard
+**Last updated:** 2026-09-17 — by Claude Code, closed out v1.1 revisions + fixed deploy preview env vars
+**Live URL:** production is `questionnaire-dma.netlify.app`, connected and deploying from GitHub — but still on the pre-PR-4 commit until PR #4 merges. PR #4's deploy preview (`https://deploy-preview-4--questionnaire-dma.netlify.app`) is confirmed working against live Supabase data as of this session.
 
 ## Current state
-Core participant flow is built and working, against real Supabase data — this
-was NOT reflected in the previous version of this file, which incorrectly
-read "Session 0 — build not started" after the Project Governor regenerated
-CLAUDE.md for the v1.1 spec revision without reconciling this file against
-the code that already existed. Corrected here.
+Core participant flow is built and working against real Supabase data, and
+all three v1.1 spec revisions are now implemented.
 
 Built:
 - All 6 screens wired end-to-end in `src/components/ParticipantExperience.jsx`
   + `src/App.jsx`: Welcome → Rating Criteria (task) → Stakeholder Group →
   Topic rating → Submit → Thank you
+- `ParticipantExperience.jsx` re-ported from `reference-prototype/` to match
+  it exactly (it had drifted): client logo (or a dashed-border placeholder)
+  is now the persistent header across every screen, and `ApusLogoLight` is
+  a small "Hosted on" credit at the page bottom only — no header placement
+  anywhere in the participant flow
+- Submit screen has the optional "Any other comments?" textarea from the
+  reference prototype, above the Submit button
+- One deliberate deviation from the reference file: its `Submit` no longer
+  passed the chosen `stakeholder` into `onSubmit(...)` — that would have
+  broken the mandatory `stakeholder_group` tagging on `ratings` rows (a hard
+  CLAUDE.md business rule, and the column is NOT NULL in Postgres). Restored
+  it: `onSubmit(answers, relevantIros, stakeholder, comment)`. Also restored
+  the `export` on `CRITERIA_FOR`, which `App.jsx` needs and the reference
+  file (a different app) doesn't export. No layout/copy/style changed.
+- `App.jsx`'s loading/config-error/not-found screens (states before an
+  assessment loads, so no client logo is available yet) no longer show
+  `ApusLogoLight` prominently — config-error and not-found now show the
+  same small "Hosted on" footer credit instead; loading stays logo-free
+- `session_comments` table + `anon insert` RLS policy created in Supabase
+  (migration `create_session_comments`); `src/lib/data.js` gained
+  `submitSessionComment`, and `App.jsx.handleSubmit` writes a row there
+  when the comment field was filled in
 - Supabase data layer (`src/lib/supabaseClient.js`, `src/lib/data.js`):
-  reads `assessments`/`iros` by slug, writes `ratings` on submit
+  reads `assessments`/`iros` by slug, writes `ratings` + `session_comments`
+  on submit
 - Supabase project provisioned (existing project reused, not a new
   `greenfriend-dma` project — see Build decisions): `assessments`, `iros`,
-  `ratings` tables + RLS policies live, documented in `docs/supabase-setup.md`
+  `ratings`, `session_comments` tables + RLS policies live, documented in
+  `docs/supabase-setup.md`
 - Netlify build config present (`netlify.toml`); a deploy-blocking bug
   (repo-root/env-var guard) was already fixed in a prior session
-- `npm install` / `npm run build` / `npm run dev` all verified working this
-  session — build succeeds, dev server serves HTTP 200
-
-Not yet built (v1.1 spec revisions — still open):
-- `session_comments` table + its RLS policy do not exist in Supabase at all
-- No "Any other comments?" field on the Submit screen — not present in
-  `ParticipantExperience.jsx`
-- Logo hierarchy only partly flipped: the Welcome screen correctly shows the
-  client logo prominently (`ParticipantExperience.jsx` `Welcome` component),
-  but `App.jsx`'s loading/config-error/not-found screens still show
-  `ApusLogoLight` as the prominent mark instead of a small bottom "Hosted on"
-  credit
+- `npm install` / `npm run build` / `npm run lint` / `npm run dev` all
+  verified working this session — build succeeds, dev server serves HTTP 200
+  on the demo assessment route
 
 ## Last session
-This session: ran `npm install`/`build`/`dev` to verify the existing build is
-healthy (it is), then audited the actual repo state against this file and
-found the "Session 0" status was stale — real build work happened across two
-earlier sessions (2026-09-10 frontend + Supabase wiring, 2026-09-11 Netlify
-deploy fix) that this file never recorded. Corrected the status; no feature
-code changed this session.
+Corrected this file's stale "Session 0" status (two real sessions of build
+work predated it and had gone unrecorded), then closed the three open v1.1
+items: created the `session_comments` table + RLS policy in Supabase,
+re-ported `ParticipantExperience.jsx` from the reference prototype (which
+fixed both the logo hierarchy and added the comments field in one move,
+since the reference already had both correct), and wired `App.jsx`/`data.js`
+around it — including fixing a `stakeholder`-dropping regression in the
+reference file's own `Submit` wiring, and fixing the same prominent-Apus-logo
+issue on `App.jsx`'s own error screens. PR #3 merged mid-session (docs-only
+correction); opened PR #4 for the v1.1 work and subscribed to it.
+
+Then spent most of the session debugging why PR #4's Netlify deploy preview
+wouldn't load `acme-2026` at all — see the Known issues incident note. Root
+cause: the legacy anon JWT in Netlify's `VITE_SUPABASE_ANON_KEY` had a
+corrupted (non-ISO-8859-1) character from a copy/paste chain, which made
+`supabase-js` throw when setting the `apikey` HTTP header. Fixed by
+switching to Supabase's newer plain-ASCII publishable key. Along the way,
+added better error diagnostics to `supabaseClient.js`/`data.js` (worth
+keeping) and discovered Netlify only re-reads env vars on a fresh
+"Clear cache and deploy site," not a plain retry. The PR #4 deploy preview
+is now confirmed loading real data from Supabase. Still no full manual
+click-through of the 6-screen flow.
 
 ## Remaining work
 - [x] First Session Setup: docs/ present, product-spec.md in place
@@ -54,28 +82,36 @@ code changed this session.
       docs/supabase-setup.md
 - [x] Supabase project created (existing project reused per builder
       instruction, not a new `greenfriend-dma` project — see Build decisions)
-- [x] Build `assessments`, `iros`, `ratings` tables and RLS policies; wrote
-      docs/supabase-setup.md
+- [x] Build `assessments`, `iros`, `ratings`, `session_comments` tables and
+      RLS policies; docs/supabase-setup.md updated
 - [x] Build Welcome — logo/name, welcome text
 - [x] Build Rating Criteria (task) screen
 - [x] Build Stakeholder Group — single-select
 - [x] Build Topic rating — one topic per page, criteria stacked, per-criterion
       skip, progress bar, back navigation
-- [x] Build Submit — final confirmation before writing ratings
+- [x] Build Submit — final confirmation, optional comments field, before
+      writing ratings + session_comments
 - [x] Build Thank you — closing screen
-- [ ] Local test pass — full walkthrough of every view before deploying (only
-      build/dev-server smoke test done so far, not a full click-through)
+- [x] Build the `session_comments` table and its RLS policy (v1.1 revision)
+- [x] Logo hierarchy: client logo (or placeholder) prominent on every
+      screen, `ApusLogoLight` demoted to a small bottom "Hosted on" credit
+      everywhere, including `App.jsx`'s pre-load/error screens (v1.1 revision)
+- [x] Submit screen: optional "Any other comments?" field wired to
+      `session_comments` (v1.1 revision)
+- [x] Netlify connected and deploying from GitHub (`questionnaire-dma.netlify.app`)
+      — was already done in an earlier session, just unconfirmed until now
+- [x] Env vars correctly set in Netlify (`VITE_SUPABASE_URL` +
+      `VITE_SUPABASE_ANON_KEY` using the publishable key) — PR #4's deploy
+      preview confirmed loading live `acme-2026` data from Supabase
+- [ ] Local test pass — full click-through of every screen (welcome through
+      thank-you, including skip/answer toggling and the comment field)
+      against the `acme-2026` demo assessment — only confirmed it loads and
+      reaches Welcome so far, not a full walkthrough
 - [ ] Acceptance criteria pass — verify every criterion in spec Section
-      "Acceptance Criteria" before deploy
-- [ ] Deploy to Netlify — no live URL confirmed yet; builder to connect repo
-      and set env vars in the Netlify dashboard
-- [ ] Build the `session_comments` table and its RLS policy (v1.1 revision)
-- [ ] Finish logo hierarchy: demote `ApusLogoLight` to a small "Hosted on"
-      credit at the bottom of `App.jsx`'s loading/config-error/not-found
-      screens too, not just the Welcome screen (v1.1 revision)
-- [ ] Submit screen: add the optional "Any other comments?" free-text field
-      above the Submit button, writing to `session_comments` on submit
-      (v1.1 revision)
+      "Acceptance Criteria" before calling this tool done
+- [ ] Merge PR #4, which will deploy the v1.1 work + these fixes to
+      production (`questionnaire-dma.netlify.app` is still on the pre-PR-4
+      commit)
 
 ## Build decisions
 - Reused an existing Supabase project (`greenfriend Double Materiality
@@ -84,21 +120,42 @@ code changed this session.
   session — see docs/supabase-setup.md.
 - `ratings` stores one row per (topic × criterion) with `value` nullable for
   skipped criteria, matching the spec's storage rule.
+- `session_comments.comment` is `not null` — the app only inserts a row when
+  the field was filled in, rather than always inserting (possibly empty).
+- When re-porting `ParticipantExperience.jsx` from the reference prototype,
+  kept two data-wiring fixes on top of an otherwise byte-identical copy (see
+  Current state above) rather than porting its `Submit`/`CRITERIA_FOR`
+  behavior verbatim — those were data-model bugs in the reference file, not
+  UI/UX choices, so CLAUDE.md's "port faithfully, don't redesign from prose"
+  rule doesn't cover them.
 
 ## Known issues
-- Netlify site not yet connected — no live URL to record.
+- **Incident, resolved this session:** Netlify's `VITE_SUPABASE_ANON_KEY` had
+  a corrupted character (non-ISO-8859-1) from a copy/paste chain, causing
+  `supabase-js` to throw `TypeError: Failed to execute 'set' on 'Headers'`
+  on every page load. Fixed by using Supabase's newer publishable key
+  (`sb_publishable_...`) instead of the legacy anon JWT — see
+  docs/supabase-setup.md's Notes section for the full writeup, including
+  the Netlify gotcha that changing an env var does nothing until you
+  specifically "Clear cache and deploy site" (a plain retry reuses the old
+  value).
+- Netlify production (`questionnaire-dma.netlify.app`) is connected and
+  auto-deploying from `main`, but is still on the pre-PR-4 commit — merge
+  PR #4 to bring it current.
 - Supabase project still on the Free plan — must be upgraded to Pro before
-  real client use (flagged in CLAUDE.md).
+  real client use (flagged in CLAUDE.md). Netlify's build-minute credit
+  limit was also hit earlier this session (production deploys were being
+  skipped) but appears to have reset on its own.
 - The prototype's `ratings` shape vs. Tool B's `assessor_ratings` table
   reconciliation (product-spec.md Section 15, Open Questions) — status
   unconfirmed this session, re-check before finalizing schema further.
-- This file was out of sync with the actual repo state (read "Session 0")
-  until this session's correction — if anything else in here looks stale
-  against the code, trust the code and fix this file, not the reverse.
+- No full click-through test yet — confirmed the deploy preview loads real
+  Supabase data and reaches the Welcome screen, but haven't walked through
+  Task → Stakeholder → Questions → Submit → Thank you end-to-end.
 
 ## Notes for next session
-Priority: close the three open v1.1 items — `session_comments` table + RLS
-policy, the Submit-screen comments field wired to it, and finishing the logo
-hierarchy swap on `App.jsx`'s non-Welcome screens. Then do the local
-click-through test pass and the acceptance-criteria pass before touching
-deploy.
+Priority: do the local click-through test pass (all 6 screens, skip/answer
+toggling, mandatory-gating behavior, the comments field, both with and
+without a client logo set) against the `acme-2026` demo assessment on PR
+#4's deploy preview, then the acceptance-criteria pass from product-spec.md.
+Then merge PR #4 so production picks up the v1.1 work and the env var fix.

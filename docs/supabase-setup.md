@@ -1,6 +1,6 @@
 # Supabase Setup — Apus DMA — Participant Questionnaire
 
-**Last updated:** 2026-09-10 — Session 1
+**Last updated:** 2026-09-17 — Session 3
 
 ## Project
 - Name: `greenfriend Double Materiality Assessment` (existing project — reused per
@@ -68,7 +68,21 @@ Owned/written by this tool (Participant Questionnaire). Tool B reads it.
 | submitted_at | timestamptz | default `now()` |
 
 Indexes: `iros(assessment_id)`, `ratings(assessment_id)`, `ratings(iro_id)`,
-`assessments(slug)`.
+`assessments(slug)`, `session_comments(assessment_id)`.
+
+### session_comments
+Owned/written by this tool (Participant Questionnaire). Added session 3 (v1.1
+revision) — the Submit screen's optional "Any other comments?" field writes
+here. Not currently read by anything in this tool or Tool B (per CLAUDE.md,
+out of scope for now).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | default `gen_random_uuid()` |
+| assessment_id | uuid, FK → assessments.id | `on delete cascade` |
+| session_id | uuid | same client-generated session id used on `ratings` rows |
+| comment | text | not null — the app only inserts a row when the field was filled in |
+| submitted_at | timestamptz | default `now()` |
 
 ## RLS Policies
 
@@ -77,6 +91,7 @@ Indexes: `iros(assessment_id)`, `ratings(assessment_id)`, `ratings(iro_id)`,
 | assessments | `anon select assessments` | `anon` role can `select` — the app always filters by exact `slug`, so this is a point-lookup in practice, not a public listing |
 | iros | `anon select iros` | `anon` role can `select` — the app always filters by exact `assessment_id` obtained from the assessments lookup |
 | ratings | `anon insert ratings` | `anon` role can `insert` only — no select/update/delete from the anon role |
+| session_comments | `anon insert session_comments` | `anon` role can `insert` only — no select/update/delete from the anon role |
 
 No insert/update/delete policy exists on `assessments` or `iros` for `anon` — those
 tables are read-only from this tool's side, matching CLAUDE.md.
@@ -90,11 +105,33 @@ the table doesn't exist or returns no rows — see PROGRESS.md.
 
 ## Environment variables
 - `VITE_SUPABASE_URL` = `https://evwmxduudcujtibirmga.supabase.co`
-- `VITE_SUPABASE_ANON_KEY` = the legacy anon key (JWT) from Project Settings →
-  API. Set both as Netlify environment variables at deploy time; never commit
-  real values (`.env` is gitignored, `.env.example` has empty placeholders).
+- `VITE_SUPABASE_ANON_KEY` = the **publishable key** (`sb_publishable_...`),
+  not the legacy anon JWT. Both work with `@supabase/supabase-js`, but use
+  the publishable key — see the incident note below. Get it from Project
+  Settings → API Keys → Publishable key. Set both as Netlify environment
+  variables at deploy time; never commit real values (`.env` is gitignored,
+  `.env.example` has empty placeholders).
 
 ## Notes for future sessions
+- **Incident (session 3):** the deployed app showed `Survey misconfigured` /
+  `TypeError: Failed to execute 'set' on 'Headers': String contains non
+  ISO-8859-1 code point` on every load. Root cause: the legacy anon JWT
+  pasted into Netlify's `VITE_SUPABASE_ANON_KEY` had picked up a stray
+  non-Latin1 character somewhere in the copy/paste chain, and
+  `supabase-js` puts this value straight into an HTTP header (`apikey`),
+  which the browser's `Headers.set()` rejects outright for any character
+  outside ISO-8859-1. Fixed by switching to the shorter, plain-ASCII
+  **publishable key** instead of the legacy JWT — same effect, much less
+  copy/paste risk. `src/lib/supabaseClient.js` and `src/lib/data.js` also
+  gained better error surfacing (per-variable presence/length diagnostics,
+  and real Postgrest error messages instead of a flat "not found") while
+  chasing this down — those are worth keeping even though the root cause
+  turned out to be Netlify-side.
+- Netlify's env-var dashboard does **not** apply a changed value to an
+  already-built deploy — even "Retry deploy" on an existing deploy entry
+  reused the old value. Only **"Clear cache and deploy site"** on a fresh
+  deploy action actually re-reads current env vars. Worth remembering for
+  any future "I changed the env var but nothing happened" report.
 - This session's sandbox could not reach `*.supabase.co` directly (organization
   egress policy blocks it for direct HTTPS/browser traffic) — schema changes went
   through fine via the Supabase MCP tool, but a live browser test of the deployed
