@@ -29,14 +29,19 @@ export async function fetchAssessmentBySlug(slug) {
     .select('id, name, mode, perspective_filter, welcome_text, logo_url, mandatory')
     .eq('slug', slug)
     .single();
-  if (error || !assessment) return null;
+  // Distinguish a real API/query error (wrong key, wrong project, RLS denial —
+  // surface it so it's visible on the deployed page) from a genuine zero-row
+  // result (single() also errors with code PGRST116 when nothing matches,
+  // which is the expected "not found" case, not a failure).
+  if (error && error.code !== 'PGRST116') throw new Error(`assessments query failed: ${error.message} (code: ${error.code})`);
+  if (!assessment) return null;
 
   const { data: iroRows, error: iroError } = await supabase
     .from('iros')
     .select('id, esrs_topic_id, name, description, iro_type, actual')
     .eq('assessment_id', assessment.id)
     .order('order', { ascending: true });
-  if (iroError) return null;
+  if (iroError) throw new Error(`iros query failed: ${iroError.message} (code: ${iroError.code})`);
 
   const iros = iroRows.map((r) => ({
     id: r.id,
