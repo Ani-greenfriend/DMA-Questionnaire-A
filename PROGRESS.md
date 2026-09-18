@@ -154,6 +154,14 @@ click-through of the 6-screen flow.
   rule doesn't cover them.
 
 ## Known issues
+- **Found this session, not this tool's to fix:** live `pg_policies` check
+  found `anon`-role INSERT/UPDATE/DELETE policies (named `TEMP anon
+  insert/update/delete ...`) on three tables owned by Tool B —
+  `stakeholder_groups`, `stakeholder_members`, `topic_library`. The public
+  anon key can currently write to those tables. CLAUDE.md forbids this tool
+  from touching RLS on protected tables even to fix this, so it's
+  documented in `docs/supabase-setup.md`'s new Security note — needs the
+  Tool B builder to remove those `TEMP` policies.
 - **Incident, resolved this session:** Netlify's `VITE_SUPABASE_ANON_KEY` had
   a corrupted character (non-ISO-8859-1) from a copy/paste chain, causing
   `supabase-js` to throw `TypeError: Failed to execute 'set' on 'Headers'`
@@ -183,3 +191,6 @@ toggling, mandatory-gating behavior, the comments field, both with and
 without a client logo set) against the `acme-2026` demo assessment on PR
 #4's deploy preview, then the acceptance-criteria pass from product-spec.md.
 Then merge PR #4 so production picks up the v1.1 work and the env var fix.
+Also: tell the Tool B builder about the `TEMP anon` write policies on
+`stakeholder_groups`/`stakeholder_members`/`topic_library` (see Known
+issues) — not fixable from this tool's side.

@@ -1,6 +1,8 @@
 # Supabase Setup — Apus DMA — Participant Questionnaire
 
-**Last updated:** 2026-09-18 — Session 4 (from Tool B's build session, adding respondent counting)
+**Last updated:** 2026-09-18 — Session 4 (verified against the live project;
+corrected the `iros` columns and Protected tables list to match reality, and
+flagged a security exposure on Tool B's tables — see Notes below)
 
 ## Project
 - Name: `greenfriend Double Materiality Assessment` (existing project — reused per
@@ -52,10 +54,12 @@ Owned/written by the Consultant Console (Tool B). This tool only reads it.
 | description | text | nullable |
 | iro_type | text | `neg_impact` \| `pos_impact` \| `risk` \| `opportunity` |
 | actual | bool | default `false` — actual vs. potential |
-| impact_threshold | numeric | nullable — unused by this tool (Tool B's scoring input) |
-| financial_threshold | numeric | nullable — unused by this tool |
+| impact_threshold | numeric | nullable, default `3.0` — unused by this tool (Tool B's scoring input) |
+| financial_threshold | numeric | nullable, default `3.0` — unused by this tool |
 | order | integer | default `0` — display order on the participant side |
 | created_at | timestamptz | default `now()` |
+| topic_library_id | uuid, FK → topic_library.id | nullable — added by Tool B; unused by this tool |
+| session_notes | text | nullable — added by Tool B; unused by this tool |
 
 ### ratings
 Owned/written by this tool (Participant Questionnaire). Tool B reads it.
@@ -129,12 +133,17 @@ server-side code, no IP address stored (simpler GDPR posture), matching what
 most lightweight survey tools do. It's a courtesy, not a hard security
 boundary: clearing storage or switching browsers resets it.
 
-## Protected tables (not created by this tool)
-`assessor_ratings`, `calibrations`, `participants`, `stakeholder_options` belong
-to the Consultant Console (Tool B) and do not exist yet. This tool's data layer
-(`src/lib/data.js`) attempts a best-effort read of `stakeholder_options` for the
-Stakeholder Group screen and falls back to the spec's default option lists when
-the table doesn't exist or returns no rows — see PROGRESS.md.
+## Protected tables (owned by Tool B — never modified by this tool)
+Per CLAUDE.md's Hard Rules, this tool must never change schema, RLS, or write
+to these. Confirmed live in the project as of this session's verification:
+`assessor_ratings`, `calibrations`, `calibration_history`, `participants`,
+`stakeholder_groups`, `stakeholder_members`, `topic_library`.
+
+This tool's data layer (`src/lib/data.js`) does a read-only, best-effort read
+of `stakeholder_groups`/`stakeholder_members` (not `stakeholder_options` —
+that table was never actually created; the real names are these two) for the
+Stakeholder Group screen, and falls back to the spec's default option lists
+if the read fails or returns no rows — see PROGRESS.md.
 
 ## Environment variables
 - `VITE_SUPABASE_URL` = `https://evwmxduudcujtibirmga.supabase.co`
@@ -144,6 +153,21 @@ the table doesn't exist or returns no rows — see PROGRESS.md.
   Settings → API Keys → Publishable key. Set both as Netlify environment
   variables at deploy time; never commit real values (`.env` is gitignored,
   `.env.example` has empty placeholders).
+
+## ⚠️ Security note (found this session, not caused by this tool)
+Live policy inspection (`pg_policies`) found `anon`-role **INSERT/UPDATE/DELETE**
+policies, named `TEMP anon insert/update/delete ...`, on three protected
+tables: `stakeholder_groups`, `stakeholder_members`, and `topic_library`
+(the latter also has a redundant `TEMP anon select`). That means the public
+anon key — the one this participant-facing tool ships to every browser —
+can currently write to Tool B's tables, not just read them.
+
+This is outside this tool's authority to fix: CLAUDE.md's Hard Rules forbid
+this tool from making *any* RLS change to `stakeholder_groups`,
+`stakeholder_members`, or `topic_library`, including tightening a policy
+someone else left open. Flagging here so the Consultant Console (Tool B)
+builder removes those `TEMP` policies before going live — they read like
+scaffolding from Tool B's own build/testing that was never cleaned up.
 
 ## Notes for future sessions
 - **Incident (session 3):** the deployed app showed `Survey misconfigured` /
