@@ -1,6 +1,6 @@
 # Supabase Setup — Apus DMA — Participant Questionnaire
 
-**Last updated:** 2026-09-17 — Session 3
+**Last updated:** 2026-09-18 — Session 4 (from Tool B's build session, adding respondent counting)
 
 ## Project
 - Name: `greenfriend Double Materiality Assessment` (existing project — reused per
@@ -34,6 +34,10 @@ Owned/written by the Consultant Console (Tool B). This tool only reads it.
 | task_text | text | nullable — **not currently read** by the ported `ParticipantExperience.jsx` (see PROGRESS.md Build decisions) |
 | mandatory | bool | default `false` |
 | created_at | timestamptz | default `now()` |
+| respondents_done | integer | default `0` — added by Tool B session 1; incremented by this tool via the `increment_respondents` RPC on each submission, see below |
+| respondents_total | integer | default `0` — added by Tool B session 1; set by Tool B at assessment creation, not read/written by this tool |
+| created_by | uuid, FK → auth.users | added by Tool B session 1 |
+| updated_at | timestamptz | added by Tool B session 1 |
 
 ### iros
 Owned/written by the Consultant Console (Tool B). This tool only reads it.
@@ -95,6 +99,35 @@ out of scope for now).
 
 No insert/update/delete policy exists on `assessments` or `iros` for `anon` — those
 tables are read-only from this tool's side, matching CLAUDE.md.
+
+### Respondent counting (added this session)
+Product need: the consultant wants to know how many people actually
+completed each survey. Rather than grant `anon` a general `UPDATE` on
+`assessments` (which would let a participant's browser rewrite any column on
+the row), Tool B added a narrow `SECURITY DEFINER` SQL function:
+
+```sql
+create or replace function public.increment_respondents(p_assessment_id uuid)
+returns void
+language sql security definer set search_path = public
+as $$
+  update public.assessments set respondents_done = respondents_done + 1
+  where id = p_assessment_id;
+$$;
+grant execute on function public.increment_respondents(uuid) to anon;
+```
+
+This tool calls it (`incrementRespondents()` in `src/lib/data.js`) right after
+a successful submit. It can only ever do this one increment — no other column
+is reachable through it. `get_advisors` flags two expected WARN-level lints
+("anon/authenticated can execute a SECURITY DEFINER function") — that's the
+intended design, not an oversight.
+
+**One-submission-per-browser** is a plain `localStorage` flag
+(`apus_submitted_<assessmentId>`, see `App.jsx`), not an IP check — no
+server-side code, no IP address stored (simpler GDPR posture), matching what
+most lightweight survey tools do. It's a courtesy, not a hard security
+boundary: clearing storage or switching browsers resets it.
 
 ## Protected tables (not created by this tool)
 `assessor_ratings`, `calibrations`, `participants`, `stakeholder_options` belong

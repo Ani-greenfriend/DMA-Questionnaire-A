@@ -1,11 +1,34 @@
 import { useEffect, useState } from 'react';
 import ParticipantExperience, { CRITERIA_FOR } from './components/ParticipantExperience';
 import ApusLogoLight from './components/ApusLogoLight';
-import { fetchAssessmentBySlug, submitRatings, submitSessionComment } from './lib/data';
+import { fetchAssessmentBySlug, submitRatings, submitSessionComment, incrementRespondents } from './lib/data';
 
 function slugFromPath() {
   const match = window.location.pathname.match(/^\/survey\/([^/]+)\/?$/);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+// One submission per browser per assessment — a plain localStorage flag, not
+// an IP check: no server-side code needed, no IP address stored (simpler
+// GDPR posture), and it's what most lightweight survey tools actually do.
+// Clearing cookies/localStorage or switching browsers resets it — an accepted
+// tradeoff for this tool's scale, not a security boundary.
+function submittedKey(assessmentId) {
+  return `apus_submitted_${assessmentId}`;
+}
+function hasAlreadySubmitted(assessmentId) {
+  try {
+    return localStorage.getItem(submittedKey(assessmentId)) === '1';
+  } catch {
+    return false; // private-browsing / blocked storage — fail open, don't block a real submission
+  }
+}
+function markSubmitted(assessmentId) {
+  try {
+    localStorage.setItem(submittedKey(assessmentId), '1');
+  } catch {
+    // ignore — storage may be unavailable; the submission itself still succeeded
+  }
 }
 
 function Centered({ children }) {
@@ -87,6 +110,21 @@ export default function App() {
     );
   }
 
+  if (hasAlreadySubmitted(assessment.id)) {
+    return (
+      <Centered>
+        <p className="text-[15px] font-semibold mb-1" style={{ color: '#111318' }}>You've already submitted this survey</p>
+        <p className="text-[12.5px] mb-6" style={{ color: '#8A8A94' }}>
+          Thanks — your answers were recorded. This link only accepts one response per person.
+        </p>
+        <div className="flex items-center justify-center gap-1.5 opacity-60">
+          <span className="text-[10.5px]" style={{ color: '#8A8A94' }}>Hosted on</span>
+          <ApusLogoLight height={13} />
+        </div>
+      </Centered>
+    );
+  }
+
   const handleSubmit = (answers, relevantIros, stakeholderGroup, comment) => {
     const rows = [];
     for (const iro of relevantIros) {
@@ -117,6 +155,16 @@ export default function App() {
         console.error('Failed to submit comment:', err);
       });
     }
+
+    // Mark this browser as done regardless of whether the count below
+    // succeeds — the real ratings rows above are what matters, and a failed
+    // counter increment shouldn't let someone spam-refresh into a real
+    // duplicate submission of the actual answers.
+    markSubmitted(assessment.id);
+    incrementRespondents(assessment.id).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('Failed to increment respondent count:', err);
+    });
   };
 
   return (

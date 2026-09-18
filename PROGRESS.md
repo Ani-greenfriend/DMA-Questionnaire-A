@@ -4,9 +4,9 @@
 > anything. Update it at every save point. Replace content — do not append.
 > History lives in git.
 
-**Session:** 3
-**Last updated:** 2026-09-17 — by Claude Code, closed out v1.1 revisions + fixed deploy preview env vars
-**Live URL:** production is `questionnaire-dma.netlify.app`, connected and deploying from GitHub — but still on the pre-PR-4 commit until PR #4 merges. PR #4's deploy preview (`https://deploy-preview-4--questionnaire-dma.netlify.app`) is confirmed working against live Supabase data as of this session.
+**Session:** 4
+**Last updated:** 2026-09-18 — by Claude Code, working from a Tool B build session
+**Live URL:** production is `questionnaire-dma.netlify.app`, deploying from `main`. PR #4 merged since the last update (confirmed via `git log` — `main` is current, includes all v1.1 work).
 
 ## Current state
 Core participant flow is built and working against real Supabase data, and
@@ -52,7 +52,20 @@ Built:
   on the demo assessment route
 
 ## Last session
-Corrected this file's stale "Session 0" status (two real sessions of build
+Session 4: this tool's participant flow was extended from Tool B's own build
+session (Consultant Console), since respondent counting genuinely spans both
+tools. Added: a one-submission-per-browser guard (`localStorage` flag,
+`hasAlreadySubmitted`/`markSubmitted` in `App.jsx` — shows a "you've already
+submitted" screen instead of the form on a repeat visit) and
+`incrementRespondents()` in `src/lib/data.js`, which calls a new
+`increment_respondents` Postgres RPC (Tool B created it — narrow
+`SECURITY DEFINER`, only ever increments `assessments.respondents_done`,
+grantable to `anon` without opening a general write on the table). Called
+right after a successful submit in `handleSubmit`. `npm run build` verified
+clean. Documented in `docs/supabase-setup.md`. Not yet click-tested in a real
+browser (same sandbox network restriction as session 3 — see Known issues).
+
+Previous session (3): corrected this file's stale "Session 0" status (two real sessions of build
 work predated it and had gone unrecorded), then closed the three open v1.1
 items: created the `session_comments` table + RLS policy in Supabase,
 re-ported `ParticipantExperience.jsx` from the reference prototype (which
@@ -76,6 +89,11 @@ is now confirmed loading real data from Supabase. Still no full manual
 click-through of the 6-screen flow.
 
 ## Remaining work
+- [ ] Click-test the one-submission-per-browser guard and respondent count
+      in a real browser: submit once, confirm the "already submitted" screen
+      appears on a second visit from the same browser, and confirm
+      `assessments.respondents_done` actually increments (Tool B's dashboard
+      can show this once its own wizard writes real assessments)
 - [x] First Session Setup: docs/ present, product-spec.md in place
 - [ ] Builder: upgrade the Supabase project to Pro in the dashboard (manual
       billing step) before real client use — still Free per
@@ -122,6 +140,12 @@ click-through of the 6-screen flow.
   skipped criteria, matching the spec's storage rule.
 - `session_comments.comment` is `not null` — the app only inserts a row when
   the field was filled in, rather than always inserting (possibly empty).
+- Respondent counting: a narrow SECURITY DEFINER RPC
+  (`increment_respondents`) rather than an anon UPDATE policy on
+  `assessments` — keeps every other column on that row unreachable from the
+  public survey. Dedup is a client-side `localStorage` flag, not an IP check
+  — simpler, no personal data stored, matches typical lightweight survey
+  tools; a courtesy, not a hard security boundary.
 - When re-porting `ParticipantExperience.jsx` from the reference prototype,
   kept two data-wiring fixes on top of an otherwise byte-identical copy (see
   Current state above) rather than porting its `Submit`/`CRITERIA_FOR`

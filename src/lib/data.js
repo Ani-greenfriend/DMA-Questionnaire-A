@@ -81,3 +81,13 @@ export async function submitSessionComment(row) {
   if (error) throw error;
   return { ok: true };
 }
+
+// Bumps assessments.respondents_done by one. Anon has no general UPDATE
+// policy on assessments — this calls a narrow SECURITY DEFINER function
+// (see Tool B's docs/supabase-setup.md) that can only ever do this one
+// increment, so a participant's browser can't touch anything else on the row.
+export async function incrementRespondents(assessmentId) {
+  const { error } = await supabase.rpc('increment_respondents', { p_assessment_id: assessmentId });
+  if (error) throw error;
+  return { ok: true };
+}
