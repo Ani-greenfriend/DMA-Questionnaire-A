@@ -57,6 +57,22 @@ Manual export of the pre-migration state: `docs/backups/pre-v2.0-migration-2026-
    rows and the re-insert then hit the new unique constraint. Rewritten to
    use `ON CONFLICT ... DO UPDATE` instead — no delete anywhere, satisfies
    the existing INSERT/UPDATE policies as-is
+10. `v2_security_lockdown_anon_link_access` — **security fix, caught in
+    review after this branch's PR was open:** migrations 5 and 8 gave anon
+    `using (true)` (every row) SELECT policies on `invitations`, `submissions`,
+    `ratings` and `topic_justifications`, narrowed only by a column grant on
+    `invitations`. That meant `link_code` — meant to be an unguessable secret
+    — was fully listable via `GET /invitations?select=link_code`, and every
+    expert's personal data (expertise, justifications, comments) was
+    readable platform-wide via `GET /submissions?select=*` etc., violating
+    spec Section 6 and acceptance criterion 16. Fixed by revoking **all**
+    anon table-level access and RLS policies on those 4 tables and replacing
+    every anon interaction with `SECURITY DEFINER` functions keyed by the
+    link code itself — a value you must already hold as input, never one you
+    can list. See "Functions added this session" and the RLS matrix below.
+    `submit_survey_response`'s signature changed from `p_invitation_id uuid`
+    to `p_link_code text` as part of this (the old uuid-keyed overload was
+    dropped). Authenticated policies were not touched.
 
 ## Tables
 
@@ -184,7 +200,7 @@ biodiversity, Future generations (`type = 'silent'`, custom entries allowed).
 | pillars | text[] | default `{}` |
 | created_at | timestamptz | |
 
-### invitations — New. Owned by Tool B. This tool only reads/writes a narrow column set (never `name`/`email`).
+### invitations — New. Owned by Tool B. Anon has **no table-level access at all** — every read/write goes through a `SECURITY DEFINER` function keyed by `link_code` (see Functions below); `name`/`email` are never selectable from the public side under any path.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid, PK | |
@@ -196,7 +212,7 @@ biodiversity, Future generations (`type = 'silent'`, custom entries allowed).
 | sent_at, opened_at, last_saved_at, submitted_at, anonymised_at | timestamptz | nullable |
 | created_at | timestamptz | |
 
-### submissions — New. Owned/written by this tool.
+### submissions — New. Owned/written by this tool. Anon has **no table-level access at all** — see `invitations` above; the same `SECURITY DEFINER` functions read/write this table internally.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid, PK | |
@@ -219,7 +235,7 @@ biodiversity, Future generations (`type = 'silent'`, custom entries allowed).
 `submissions_source_reference` check constraint enforces exactly one of
 `invitation_id` / `live_session_id` is set, matching `source`.
 
-### ratings — Changed. Owned/written by this tool (and, later, Tool B for live sessions).
+### ratings — Changed. Owned/written by this tool (and, later, Tool B for live sessions). Anon has **no table-level access at all** — see `invitations` above.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid, PK | |
@@ -233,7 +249,7 @@ biodiversity, Future generations (`type = 'silent'`, custom entries allowed).
 **Retired columns:** `stakeholder_group`, `session_id` (both moved to
 `submissions`).
 
-### topic_justifications — New. Owned/written by this tool.
+### topic_justifications — New. Owned/written by this tool. Anon has **no table-level access at all** — see `invitations` above.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid, PK | |
@@ -278,14 +294,12 @@ or the topic's when the mode is per topic, via `coalesce`), `stakeholder_group`,
 **Anon (unauthenticated, public survey):**
 | Table | Access |
 |---|---|
-| assessments, iros, clients, stakeholder_groups | SELECT, all columns, all rows (row-level scoping isn't possible without an auth identity — same accepted pattern as v1.1; data is non-sensitive display content) |
+| assessments, iros, clients, stakeholder_groups | SELECT, all columns, all rows (row-level scoping isn't possible without an auth identity — same accepted pattern as v1.1; data is non-sensitive display content, not a secret or personal data) |
 | cycles | SELECT limited to columns `(id, esrs_version, stage, client_id)` via column grant — thresholds, sign-off/approver fields stay internal. `stage` and `client_id` were added in `v2_frontend_support` (needed for the closed-survey check and the client logo lookup) |
-| invitations | SELECT limited to columns `(id, assessment_id, link_code, status, submitted_at)`; UPDATE limited to columns `(status, opened_at, last_saved_at, submitted_at)` — `name`/`email` never exposed or writable. No general SELECT/UPDATE policy exists; access is column-grant-scoped on top of a `using (true)` policy, so the *column grant* is the real boundary |
-| submissions | SELECT all; INSERT (`source = 'expert_survey'` only); UPDATE only while `status = 'draft'` |
-| ratings, topic_justifications | SELECT all; INSERT/UPDATE only while the parent submission is a draft (checked via `EXISTS` subquery against `submissions.status`) |
+| invitations, submissions, ratings, topic_justifications | **No table-level access whatsoever** — no RLS policy, no grant, of any kind, for any operation. `migration 10` fixed a bug where these had `using (true)` SELECT policies (invitations narrowed only by a column grant, the other three not narrowed at all), which meant `link_code` — meant to be unguessable — was fully listable, and every expert's personal data was readable platform-wide. All anon access to these 4 tables now goes through the `SECURITY DEFINER` functions below, keyed by `link_code`: a value the caller must already hold as an input, never one that can be listed or enumerated from the table itself |
 | stakeholder_members | **no access** — Tool A's CLAUDE.md read list never included this table; the v1.1 "anon select stakeholder_members" policy was dropped this session, not carried forward |
 | topic_library, practice_settings, threshold_changes, live_sessions, live_session_participants, attendance_edit_log, calibrations, calibration_history | no access |
-| All tables | **no DELETE ever** for anon |
+| All tables | **no DELETE ever** for anon, including inside the `SECURITY DEFINER` functions (they use `ON CONFLICT ... DO UPDATE`, never `DELETE`) |
 
 **Authenticated (Tool B, magic-link login, one shared access level):** full
 matrix per product-spec-tool-b-consultant-console.md Section 6 — SELECT/INSERT/UPDATE
@@ -304,16 +318,33 @@ UPDATE/DELETE policy exists for any role).
 
 ## Functions added this session
 
-### submit_survey_response(p_invitation_id, p_overall_comment, p_ratings, p_topic_justifications) → uuid
-`SECURITY INVOKER` (runs as the calling role — anon's existing RLS policies
-apply as normal; this function only makes the multi-table write atomic, it
-does not widen access). Upserts every rating row and topic justification for
-the draft submission tied to `p_invitation_id`, then marks the submission and
-invitation `submitted`. Raises if no draft exists or it's already submitted.
-Granted `EXECUTE` to `anon`. This is the only all-or-nothing write in the
-tool (product-spec.md: "written as one complete, all-or-nothing submission
-... or nothing at all") — everything else (draft saves) is plain
-best-effort upserts, since drafts never count in results.
+All six below are `SECURITY DEFINER`, `SET search_path = public` (closes the
+classic search-path-hijack hole on definer functions), `EXECUTE` revoked from
+`PUBLIC` and granted explicitly to `anon`. Together they are the **entire**
+anon access surface for `invitations`/`submissions`/`ratings`/
+`topic_justifications` — the tables themselves have zero direct grants (see
+the RLS matrix above), so a function's own `WHERE link_code = p_link_code`
+(or a join through it) is the only thing scoping a caller to their own data.
+`authenticated` can also call these (Supabase grants new function `EXECUTE`
+to `authenticated` by default) but gains nothing from it — the authenticated
+role already has full table access via its own broader RLS policies, so this
+is redundant, not a new privilege.
+
+- **lookup_invitation(p_link_code text) → table(id, assessment_id, status, submitted_at)** — the narrow lookup by link code. Returns zero or one row; never exposes `name`/`email`.
+- **mark_invitation_opened(p_link_code text) → void** — bumps `invited → opened`; no-ops for any other status.
+- **get_draft(p_link_code text) → jsonb** — returns `{submission, ratings, topic_justifications}` for the one invitation matching the code, or `null` if none/no draft yet.
+- **create_draft(p_link_code, p_stakeholder_group, p_perspective, p_expertise_topics, p_expertise_explanation, p_title, p_basis_for_representation) → jsonb** — creates the one draft submission for that invitation (looks up `assessment_id` and sets `consent_given_at` server-side); raises if the invitation is invalid, already submitted, or already has a draft.
+- **save_progress(p_link_code, p_current_topic_index, p_ratings, p_topic_justifications) → void** — best-effort draft upsert (see Build decisions on why this doesn't need the atomic guarantee); raises if the submission is no longer a draft.
+- **submit_survey_response(p_link_code text, p_overall_comment text, p_ratings jsonb, p_topic_justifications jsonb) → uuid** — the only all-or-nothing write in the tool (product-spec.md: "written as one complete, all-or-nothing submission ... or nothing at all"). Upserts every rating row and topic justification, then marks the submission and invitation `submitted`. Raises if no draft exists or it's already submitted. Signature changed from `p_invitation_id uuid` in `migration 8`/`9` to `p_link_code text` in `migration 10` (the old overload was dropped) — the invitation id is no longer something the client needs to hold at all.
+
+All six were functionally verified end to end against a fresh test
+invitation (`link_code = a1b2c3d4e5f6a1b2c3d4e5f6`, created and then reset
+back to a clean `invited` state afterward) via `execute_sql`: lookup on a
+real and a bogus code, opened → draft → save → resume (`get_draft` round-
+trips correctly) → submit → re-submit correctly rejected. Also confirmed via
+`information_schema.role_table_grants`/`role_routine_grants` that `anon` has
+zero grants on the 4 locked-down tables and exactly these 6 functions
+executable.
 
 ## Retired functions, triggers and jobs
 - `increment_respondents(uuid)` — dropped (was `SECURITY DEFINER`, callable by
@@ -337,9 +368,16 @@ best-effort upserts, since drafts never count in results.
 - 10 IROs snapshotted from `topic_library` (all current master-library topics —
   a mix of `neg_impact`, `pos_impact`, `risk` and `opportunity` across E1, E2,
   E5, S1, S2, G1)
-- 1 demo invitation: name "Demo Expert" (placeholder — GDPR-safe, not a real
-  person), stakeholder group "Employees", `link_code = 33168bb608ca541d0a44a623`,
-  status `invited`
+- 2 demo invitations, both placeholder names (GDPR-safe, not real people):
+  - "Demo Expert", stakeholder group "Employees",
+    `link_code = 33168bb608ca541d0a44a623` — used for a manual browser
+    click-through this session (before the migration-10 security fix); now
+    `submitted` and no longer usable for a fresh save/resume test
+  - "Demo Expert 2", stakeholder group "Suppliers",
+    `link_code = a1b2c3d4e5f6a1b2c3d4e5f6` — created to verify the new
+    `SECURITY DEFINER` functions end to end (see Functions below), then
+    reset back to a clean `invited` state; use this one for the next
+    browser test of save/resume/submit
 - `stakeholder_groups` (34 rows: 31 original + 3 new silent presets) and
   `stakeholder_members` (3 test rows: "k", "test", "s" — pre-existing test
   data, confirmed non-real before the migration) carried forward unchanged

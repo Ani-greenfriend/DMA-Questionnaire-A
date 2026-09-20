@@ -5,29 +5,24 @@ function assertReady() {
 }
 
 // Narrow lookup by link code — the only way anon can ever reach an
-// invitation row. The anon column grant on `invitations` (see
-// docs/supabase-setup.md) only exposes id/assessment_id/status/submitted_at;
-// name and email are never selectable from here.
+// invitation. Anon has NO table-level access to `invitations` at all (see
+// docs/supabase-setup.md): this calls a SECURITY DEFINER function that takes
+// the code as an input and returns just id/assessment_id/status/submitted_at
+// for the one matching row. The code is a secret you must already hold, not
+// a value that can be listed or enumerated — there is no anon SELECT policy
+// on the table that could leak the full set of codes.
 export async function lookupInvitationByCode(linkCode) {
   assertReady();
-  const { data, error } = await supabase
-    .from('invitations')
-    .select('id, assessment_id, status, submitted_at')
-    .eq('link_code', linkCode)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('lookup_invitation', { p_link_code: linkCode });
   if (error) throw new Error(`invitation lookup failed: ${error.message} (code: ${error.code})`);
-  return data;
+  return data?.[0] ?? null;
 }
 
-export async function markInvitationOpened(invitationId) {
+export async function markInvitationOpened(linkCode) {
   assertReady();
   // Only bumps invited -> opened; a saved/submitted invitation is left alone
-  // (the .eq('status', 'invited') guard prevents regressing a later status).
-  const { error } = await supabase
-    .from('invitations')
-    .update({ status: 'opened', opened_at: new Date().toISOString() })
-    .eq('id', invitationId)
-    .eq('status', 'invited');
+  // (the function's own WHERE ... and status = 'invited' guard).
+  const { error } = await supabase.rpc('mark_invitation_opened', { p_link_code: linkCode });
   if (error) throw new Error(`invitation update failed: ${error.message}`);
 }
 
@@ -111,54 +106,32 @@ export function isSurveyClosed(assessment) {
   return false;
 }
 
-export async function fetchDraft(invitationId) {
+// Anon has no table-level access to submissions/ratings/topic_justifications
+// either (see docs/supabase-setup.md) — every draft read/write goes through
+// a SECURITY DEFINER function keyed by link_code, so a browser can only ever
+// reach the one draft its own secret link resolves to.
+export async function fetchDraft(linkCode) {
   assertReady();
-  const { data: submission, error } = await supabase
-    .from('submissions')
-    .select('*')
-    .eq('invitation_id', invitationId)
-    .maybeSingle();
-  if (error) throw new Error(`submission fetch failed: ${error.message} (code: ${error.code})`);
-  if (!submission) return null;
-
-  const { data: ratingRows, error: rErr } = await supabase
-    .from('ratings')
-    .select('iro_id, criterion_key, value, justification')
-    .eq('submission_id', submission.id);
-  if (rErr) throw new Error(`ratings fetch failed: ${rErr.message} (code: ${rErr.code})`);
-
-  const { data: tjRows, error: tErr } = await supabase
-    .from('topic_justifications')
-    .select('iro_id, justification')
-    .eq('submission_id', submission.id);
-  if (tErr) throw new Error(`topic_justifications fetch failed: ${tErr.message} (code: ${tErr.code})`);
-
-  return { submission, ratings: ratingRows, topicJustifications: tjRows };
+  const { data, error } = await supabase.rpc('get_draft', { p_link_code: linkCode });
+  if (error) throw new Error(`draft fetch failed: ${error.message} (code: ${error.code})`);
+  if (!data) return null;
+  return { submission: data.submission, ratings: data.ratings, topicJustifications: data.topic_justifications };
 }
 
 export async function createDraft({
-  assessmentId, invitationId, stakeholderGroup, perspective, expertiseTopics,
-  expertiseExplanation, title, basisForRepresentation, consentGivenAt,
+  linkCode, stakeholderGroup, perspective, expertiseTopics,
+  expertiseExplanation, title, basisForRepresentation,
 }) {
   assertReady();
-  const { data, error } = await supabase
-    .from('submissions')
-    .insert({
-      assessment_id: assessmentId,
-      source: 'expert_survey',
-      invitation_id: invitationId,
-      status: 'draft',
-      stakeholder_group: stakeholderGroup,
-      perspective,
-      expertise_topics: expertiseTopics,
-      expertise_explanation: expertiseExplanation,
-      title: title || null,
-      basis_for_representation: basisForRepresentation || null,
-      consent_given_at: consentGivenAt,
-      current_topic_index: 0,
-    })
-    .select()
-    .single();
+  const { data, error } = await supabase.rpc('create_draft', {
+    p_link_code: linkCode,
+    p_stakeholder_group: stakeholderGroup,
+    p_perspective: perspective,
+    p_expertise_topics: expertiseTopics,
+    p_expertise_explanation: expertiseExplanation,
+    p_title: title || null,
+    p_basis_for_representation: basisForRepresentation || null,
+  });
   if (error) throw new Error(`draft creation failed: ${error.message} (code: ${error.code})`);
   return data;
 }
@@ -167,43 +140,25 @@ export async function createDraft({
 // continue later") don't need the all-or-nothing guarantee that Submit
 // does — an interrupted draft save just leaves the draft slightly behind,
 // which is fine since drafts never count in results.
-export async function saveProgress({ submissionId, invitationId, currentTopicIndex, ratings, topicJustifications, overallComment }) {
+export async function saveProgress({ linkCode, currentTopicIndex, ratings, topicJustifications }) {
   assertReady();
-  const now = new Date().toISOString();
-
-  if (ratings.length) {
-    const { error } = await supabase
-      .from('ratings')
-      .upsert(ratings.map((r) => ({ submission_id: submissionId, ...r })), { onConflict: 'submission_id,iro_id,criterion_key' });
-    if (error) throw new Error(`ratings save failed: ${error.message} (code: ${error.code})`);
-  }
-  if (topicJustifications.length) {
-    const { error } = await supabase
-      .from('topic_justifications')
-      .upsert(topicJustifications.map((t) => ({ submission_id: submissionId, ...t })), { onConflict: 'submission_id,iro_id' });
-    if (error) throw new Error(`topic justification save failed: ${error.message} (code: ${error.code})`);
-  }
-
-  const patch = { current_topic_index: currentTopicIndex, last_saved_at: now };
-  if (overallComment !== undefined) patch.overall_comment = overallComment;
-  const { error: sErr } = await supabase.from('submissions').update(patch).eq('id', submissionId);
-  if (sErr) throw new Error(`submission save failed: ${sErr.message} (code: ${sErr.code})`);
-
-  const { error: iErr } = await supabase
-    .from('invitations')
-    .update({ status: 'saved', last_saved_at: now })
-    .eq('id', invitationId);
-  if (iErr) throw new Error(`invitation save failed: ${iErr.message} (code: ${iErr.code})`);
+  const { error } = await supabase.rpc('save_progress', {
+    p_link_code: linkCode,
+    p_current_topic_index: currentTopicIndex,
+    p_ratings: ratings,
+    p_topic_justifications: topicJustifications,
+  });
+  if (error) throw new Error(`progress save failed: ${error.message} (code: ${error.code})`);
 }
 
 // The only all-or-nothing write in this tool: one Postgres function call,
 // one transaction (see the `submit_survey_response` function in
 // docs/supabase-setup.md) — every rating row and justification with status
 // set to submitted, or nothing at all.
-export async function submitFinal({ invitationId, overallComment, ratings, topicJustifications }) {
+export async function submitFinal({ linkCode, overallComment, ratings, topicJustifications }) {
   assertReady();
   const { data, error } = await supabase.rpc('submit_survey_response', {
-    p_invitation_id: invitationId,
+    p_link_code: linkCode,
     p_overall_comment: overallComment || '',
     p_ratings: ratings,
     p_topic_justifications: topicJustifications,
