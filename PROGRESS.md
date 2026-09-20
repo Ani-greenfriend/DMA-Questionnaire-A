@@ -5,7 +5,7 @@
 > History lives in git.
 
 **Session:** 4
-**Last updated:** 2026-09-18 — by Claude Code, working from a Tool B build session
+**Last updated:** 2026-09-20 — by Project Governor, spec revised to v2.0 (session state below preserved; no v2.0 code built yet)
 **Live URL:** production is `questionnaire-dma.netlify.app`, deploying from `main`. PR #4 merged since the last update (confirmed via `git log` — `main` is current, includes all v1.1 work).
 
 ## Current state
@@ -89,7 +89,7 @@ is now confirmed loading real data from Supabase. Still no full manual
 click-through of the 6-screen flow.
 
 ## Remaining work
-- [ ] Click-test the one-submission-per-browser guard and respondent count
+- [ ] *(superseded by v2.0 revision — the localStorage guard and respondent counter are retired)* Click-test the one-submission-per-browser guard and respondent count
       in a real browser: submit once, confirm the "already submitted" screen
       appears on a second visit from the same browser, and confirm
       `assessments.respondents_done` actually increments (Tool B's dashboard
@@ -98,6 +98,7 @@ click-through of the 6-screen flow.
 - [ ] Builder: upgrade the Supabase project to Pro in the dashboard (manual
       billing step) before real client use — still Free per
       docs/supabase-setup.md
+      *(superseded 2026-09-20 — builder decided to stay on Free; accepted risk, see Known issues)*
 - [x] Supabase project created (existing project reused per builder
       instruction, not a new `greenfriend-dma` project — see Build decisions)
 - [x] Build `assessments`, `iros`, `ratings`, `session_comments` tables and
@@ -125,11 +126,32 @@ click-through of the 6-screen flow.
       thank-you, including skip/answer toggling and the comment field)
       against the `acme-2026` demo assessment — only confirmed it loads and
       reaches Welcome so far, not a full walkthrough
+      *(v1.1 screens — superseded by the v2.0 acceptance pass below)*
 - [ ] Acceptance criteria pass — verify every criterion in spec Section
       "Acceptance Criteria" before calling this tool done
+      *(now the 18 criteria of spec v2.0 — see the v2.0 items below)*
 - [ ] Merge PR #4, which will deploy the v1.1 work + these fixes to
       production (`questionnaire-dma.netlify.app` is still on the pre-PR-4
       commit)
+      *(the header says PR #4 is merged — verify with `git log` and tick)*
+
+### v2.0 revision items (spec v2.0, 2026-09-20)
+- [ ] (v2.0 revision) Builder: add `product-spec-tool-b-consultant-console.md` and the newer `supabase-setup.md` (Tool B's copy) to the repo before starting
+- [ ] (v2.0 revision) Connect to the existing Supabase project, inspect the live database via MCP and reconcile docs/supabase-setup.md
+- [ ] (v2.0 revision) Take a manual export of existing data (Free plan has no automatic backups)
+- [ ] (v2.0 revision) Run the shared migration per spec Section 5 with RLS on every table; retire session_comments, assessor_ratings + its pg_cron job, increment_respondents and respondent counters, old participants table
+- [ ] (v2.0 revision) Re-create the `acme-2026` demo assessment and a demo invitation in the new structure; update docs/supabase-setup.md
+- [ ] (v2.0 revision) Rework the data layer: link-code lookup, draft save and resume, all-or-nothing submit; remove the localStorage guard and `incrementRespondents`
+- [ ] (v2.0 revision) Build Welcome with consent checkbox, data statement (contact anikalerch@greenfriend.org) and resume-link note; drop "fully anonymous"
+- [ ] (v2.0 revision) Build About you — expertise E1–G1, explanation, optional title, group and perspective, silent stakeholder groups; replaces the Stakeholder Group screen
+- [ ] (v2.0 revision) Update Rating Criteria and Topic rating — criteria per IRO type, justification per criterion or per topic, Save and continue later on every page
+- [ ] (v2.0 revision) Build the Save and continue later confirmation screen with copyable personal link
+- [ ] (v2.0 revision) Update Submit — overall comment into the submission; all-or-nothing write
+- [ ] (v2.0 revision) Build the already-submitted, invalid-link and survey-closed screens
+- [ ] (v2.0 revision) Local test pass with a demo personal link, including save, resume and submit
+- [ ] (v2.0 revision) Acceptance criteria pass — all 18 criteria in spec v2.0 Section 13
+- [ ] (v2.0 revision) Builder, before inviting any real expert: short GDPR check (legal basis, anonymise-on-request approach)
+- [ ] (v2.0 revision) Deploy to Netlify via MCP and set environment variables
 
 ## Build decisions
 - Reused an existing Supabase project (`greenfriend Double Materiality
@@ -170,15 +192,24 @@ click-through of the 6-screen flow.
   real client use (flagged in CLAUDE.md). Netlify's build-minute credit
   limit was also hit earlier this session (production deploys were being
   skipped) but appears to have reset on its own.
+  **Update 2026-09-20:** builder decided to stay on the Free plan — accepted risk: personal and resume links break while the project is paused; open a survey link weekly during a survey window.
 - The prototype's `ratings` shape vs. Tool B's `assessor_ratings` table
   reconciliation (product-spec.md Section 15, Open Questions) — status
   unconfirmed this session, re-check before finalizing schema further.
+  **Update 2026-09-20:** resolved by spec v2.0 — the combined ratings view replaces `assessor_ratings` and the sync job.
 - No full click-through test yet — confirmed the deploy preview loads real
   Supabase data and reaches the Welcome screen, but haven't walked through
   Task → Stakeholder → Questions → Submit → Thank you end-to-end.
+- Spec revised to v2.0 on 2026-09-20 — CLAUDE.md regenerated by Project Governor
+- docs/supabase-setup.md exists in two copies (Tool A and Tool B repos) that had drifted; the Tool B copy is more current — use it as the base and verify against the live database before migrating
+- Before inviting any real expert, the builder gets a short GDPR check (business reason: audit traceability; anonymise-on-request approach). Does not block the build
+- Open non-blocking spec questions (spec Section 15): link-to-route design, prototype coverage of the new screens, Welcome time-needed wording
 
 ## Notes for next session
-Priority: do the local click-through test pass (all 6 screens, skip/answer
+PRIORITY (v2.0 revision): spec v2.0 supersedes the plan below. Start with the shared
+migration: add the Tool B spec and newer supabase-setup.md to the repo, inspect
+the live database, take a manual export, migrate, then build the new screens.
+Earlier note (v1.1 plan, now mostly superseded): do the local click-through test pass (all 6 screens, skip/answer
 toggling, mandatory-gating behavior, the comments field, both with and
 without a client logo set) against the `acme-2026` demo assessment on PR
 #4's deploy preview, then the acceptance-criteria pass from product-spec.md.
