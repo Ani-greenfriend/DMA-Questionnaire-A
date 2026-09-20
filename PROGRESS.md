@@ -5,17 +5,18 @@
 > History lives in git.
 
 **Session:** 5
-**Last updated:** 2026-09-20 — v2.0 migration + frontend rework + a security fix to anon access, all on an open PR
+**Last updated:** 2026-09-20 — PR #6 (v2.0 migration + frontend) merged to `main` *before* a security fix found in review was ready; PR #7 now open with that fix
 **Live URL:** production is `questionnaire-dma.netlify.app`, deploying from
-`main`, still on v1.1 frontend code. This session's work is on
-`claude/amazing-clarke-fxrzeo`, with
-[PR #6](https://github.com/Ani-greenfriend/DMA-Questionnaire-A/pull/6) open
-against `main` (CI green, deploy preview at
-`https://deploy-preview-6--questionnaire-dma.netlify.app`, not yet merged).
-Production is broken in the meantime (queries a schema this session
-retired); no real experts have been invited (GDPR section gates that on the
-build being finished), so this is an accepted transitional state, not a live
-incident.
+`main`, which is now at PR #6's merge commit (`63d5d3d`) — the pre-security-
+fix v2.0 frontend. The database itself is already fixed (migration 10, see
+Build decisions), which means **production is currently broken** (not
+insecure — the hole itself is closed at the DB level regardless of what
+frontend is deployed): the merged frontend calls table access and a function
+signature that migration 10 removed.
+[PR #7](https://github.com/Ani-greenfriend/DMA-Questionnaire-A/pull/7) has
+the matching frontend fix, open against `main`, not yet merged. No real
+experts have been invited, so no personal data was ever actually exposed by
+the pre-fix window — but merging PR #7 promptly is the priority.
 
 ## Current state
 The v2.0 shared database migration, the full frontend rework, and a
@@ -92,14 +93,12 @@ All of it — see Current state above. Nothing left undone in the build
 itself; what remains is verification.
 
 ### v2.0 revision — verification and deploy (next)
-- [ ] Commit and push the security-fix changes (`src/lib/data.js`,
-      `src/App.jsx`, `src/components/ExpertSurvey.jsx`,
-      `docs/supabase-setup.md`) to `claude/amazing-clarke-fxrzeo` — the code
-      changes are made and build/lint clean, but not yet in a commit as of
-      this save point
-- [ ] **Re-test the deploy preview in a real browser after the security fix
-      lands** — the only browser test so far (confirmed working) ran against
-      the pre-fix access pattern. Use the fresh test invitation
+- [x] Commit and push the security-fix changes — done, on PR #7
+- [ ] **Merge PR #7 promptly** — `main`/production is currently broken
+      (pre-fix frontend against the now-locked-down database) until it lands
+- [ ] Re-test PR #7's deploy preview in a real browser against the new
+      access pattern (the only confirmed-working browser test ran on PR #6,
+      before this fix). Use the fresh test invitation
       (`link_code = a1b2c3d4e5f6a1b2c3d4e5f6`, "Demo Expert 2") for a clean
       save/resume/submit pass, since the original demo link
       (`33168bb608ca541d0a44a623`) is now `submitted`
@@ -109,7 +108,6 @@ itself; what remains is verification.
       should each return nothing
 - [ ] Acceptance criteria pass — all 18 criteria in spec v2.0 Section 13,
       including #16 (public-side security) which this fix directly targets
-- [ ] Merge PR #6 once the above is confirmed
 - [ ] Builder, before inviting any real expert: short GDPR check (legal
       basis, anonymise-on-request approach) — flagged, not blocking
 
@@ -194,39 +192,34 @@ itself; what remains is verification.
   product-spec.md Section 8.
 
 ## Known issues
-- **The security-fix code changes are not yet committed.** SQL migration 10
-  is live in Supabase (verified working); the matching frontend changes
-  (`src/lib/data.js`, `src/App.jsx`, `src/components/ExpertSurvey.jsx`) and
-  the `docs/supabase-setup.md` rewrite are made and build/lint clean in the
-  working tree, but this save point is being written before that commit —
-  push immediately after.
+- **`main`/production is currently broken.** PR #6 merged the pre-security-
+  fix frontend (`d6b1587`) before migration 10 (this session's security fix)
+  landed. The database is already locked down — that part is done and
+  correct — but `main`'s deployed frontend now calls direct table access
+  (anon has zero grants now) and the old `submit_survey_response(uuid, ...)`
+  signature (dropped). [PR #7](https://github.com/Ani-greenfriend/DMA-Questionnaire-A/pull/7)
+  has the fix; merging it promptly is the top priority. No real expert data
+  exists, so nothing was actually exposed during the gap between the two
+  PRs — but production is non-functional until #7 merges.
 - **No browser test yet of the post-fix flow.** The one confirmed-working
-  browser test (deploy preview for PR #6) ran before the security fix, so it
+  browser test (PR #6's deploy preview) ran before the security fix, so it
   exercised the old (leaky) direct-table access pattern, not the new
   function-based one. The new access path was verified at the SQL level
   only (via `execute_sql`, which runs server-side, not through this
-  sandbox's network — this sandbox still can't reach `*.supabase.co` or the
+  sandbox's network — this sandbox still can't reach `*.supabase.co` or any
   Netlify preview directly, confirmed via verbose curl:
-  `CONNECT tunnel failed, response 403`). A real click-through against the
-  fresh test invitation is the top item in Remaining work.
-- **Frontend/database mismatch on production, until PR #6 merges:**
-  `main`'s deployed frontend is still v1.1 code querying the schema this
-  session retired. No real expert data exists yet, so this remains an
-  accepted transitional state.
+  `CONNECT tunnel failed, response 403`). A real click-through against PR
+  #7's deploy preview is the top item in Remaining work.
 - Supabase project still on the Free plan — builder's accepted risk. Not a
   blocker; revisit before real client use.
 - Before inviting any real expert, the builder gets a short GDPR check.
   Does not block the build.
 
 ## Notes for next session
-If this session ended before the security-fix commit landed: commit and
-push `src/lib/data.js`, `src/App.jsx`, `src/components/ExpertSurvey.jsx` and
-`docs/supabase-setup.md` to `claude/amazing-clarke-fxrzeo` first, before
-anything else — check `git status`/`git diff` against this file's own
-description of the fix to confirm nothing is missing.
-
-Then get a real post-fix browser test: open the PR #6 deploy preview and
-walk `/survey/acme-2026/a1b2c3d4e5f6a1b2c3d4e5f6` ("Demo Expert 2", a clean
+Check PR #7's status first (`https://github.com/Ani-greenfriend/DMA-Questionnaire-A/pull/7`)
+— if it's already merged, skip to the acceptance-criteria pass below. If
+not, get a real browser test of its deploy preview: walk
+`/survey/acme-2026/a1b2c3d4e5f6a1b2c3d4e5f6` ("Demo Expert 2", a clean
 `invited` invitation) end to end — Welcome (consent), About you, Rating
 Criteria, topics (answer/skip, check per-criterion justification gating —
 the demo assessment's `justification_mode` is `per_criterion`),
@@ -234,5 +227,6 @@ Save-and-continue-later (copy the link, reopen it, confirm resume restores
 state), Submit, Thank you, then reopen the same link and confirm
 "already submitted." Also spot-check that a raw REST call with the anon key
 (`GET /rest/v1/invitations`, `/submissions`, `/ratings`,
-`/topic_justifications`) returns nothing. Then run the full Section 13
-acceptance criteria list and merge PR #6.
+`/topic_justifications`) returns nothing. Then merge PR #7 (production is
+broken until it lands) and run the full Section 13 acceptance criteria
+list.
