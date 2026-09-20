@@ -510,11 +510,10 @@ function keyFor(iroId, criterionKey) {
 }
 
 export default function ExpertSurvey({
-  invitationId, assessment, iros, stakeholderGroups, draft, linkUrl, initialTopicIndex,
+  linkCode, assessment, iros, stakeholderGroups, draft, linkUrl, initialTopicIndex,
 }) {
   const [phase, setPhase] = useState('welcome');
   const [consentChecked, setConsentChecked] = useState(false);
-  const [submissionId, setSubmissionId] = useState(draft?.submission?.id ?? null);
   const [qIndex, setQIndex] = useState(initialTopicIndex);
   const [answers, setAnswers] = useState(() => {
     const initial = {};
@@ -565,12 +564,10 @@ export default function ExpertSurvey({
       : [];
 
     saveProgress({
-      submissionId,
-      invitationId,
+      linkCode,
       currentTopicIndex: nextIndexForCursor,
       ratings: ratingsRows,
       topicJustifications: tjRows,
-      overallComment: undefined,
     }).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('Failed to save progress:', err);
@@ -580,18 +577,15 @@ export default function ExpertSurvey({
   const handleAboutYouNext = async ({ expertise, explanation, title, group, basis }) => {
     const perspective = group.type === 'financial' ? 'financial' : 'impact';
     try {
-      const submission = await createDraft({
-        assessmentId: assessment.id,
-        invitationId,
+      await createDraft({
+        linkCode,
         stakeholderGroup: group.name,
         perspective,
         expertiseTopics: expertise,
         expertiseExplanation: explanation,
         title,
         basisForRepresentation: basis,
-        consentGivenAt: new Date().toISOString(),
       });
-      setSubmissionId(submission.id);
       setPhase('task');
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -645,7 +639,7 @@ export default function ExpertSurvey({
       }
     }
     try {
-      await submitFinal({ invitationId, overallComment: comment.trim(), ratings: ratingsRows, topicJustifications: tjRows });
+      await submitFinal({ linkCode, overallComment: comment.trim(), ratings: ratingsRows, topicJustifications: tjRows });
       setPhase('done');
     } catch (err) {
       setSubmitError(err.message || 'Submission failed');

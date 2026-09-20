@@ -53,15 +53,15 @@ export default function App() {
           return;
         }
 
-        markInvitationOpened(invitation.id).catch((err) => {
+        markInvitationOpened(linkCode).catch((err) => {
           // eslint-disable-next-line no-console
           console.error('Failed to mark invitation opened:', err);
         });
 
-        const draft = await fetchDraft(invitation.id);
+        const draft = await fetchDraft(linkCode);
         if (cancelled) return;
 
-        setContext({ invitation, ...surveyContext, draft });
+        setContext({ ...surveyContext, draft });
         setStatus('ready');
       } catch (err) {
         if (cancelled) return;
@@ -126,7 +126,7 @@ export default function App() {
 
   return (
     <ExpertSurvey
-      invitationId={context.invitation.id}
+      linkCode={linkCode}
       assessment={context.assessment}
       iros={context.iros}
       stakeholderGroups={context.stakeholderGroups}
