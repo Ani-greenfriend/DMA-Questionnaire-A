@@ -11,6 +11,10 @@ export const ESRS_TOPICS = [
   { id: 'G1', cat: 'G', name: 'G1 · Business conduct' },
 ];
 
+// About you — Section 8's field-of-expertise multi-select: the ESRS topics
+// plus one catch-all option.
+export const EXPERTISE_OPTIONS = [...ESRS_TOPICS, { id: 'Other', cat: null, name: 'Other / cross-cutting' }];
+
 export const TYPE_LABEL = {
   neg_impact: 'Negative impact',
   pos_impact: 'Positive impact',

@@ -5,9 +5,11 @@
 > owns the sections below the "Tool B additions" marker; edit Tool A's copy
 > for anything above it.
 
-**Last updated:** 2026-09-18 — Tool B session 1 (added this tool's 8 tables,
-fixed the `TEMP anon` write-policy exposure flagged below, backfilled
-`assessor_ratings` from Tool A's existing demo data — see "Tool B additions")
+**Last updated:** 2026-09-20 — Tool A session 5, v2.0 shared migration
+(performed in full per product-spec.md Section 5 and
+product-spec-tool-b-consultant-console.md Section 5/6 — Tool A builds first
+and migrates the whole shared schema). Replaces the v1.1 schema entirely.
+Manual export of the pre-migration state: `docs/backups/pre-v2.0-migration-2026-09-20.md`.
 
 ## Project
 - Name: `greenfriend Double Materiality Assessment` (existing project — reused per
@@ -16,274 +18,340 @@ fixed the `TEMP anon` write-policy exposure flagged below, backfilled
 - Project ID: `evwmxduudcujtibirmga`
 - Project URL: `https://evwmxduudcujtibirmga.supabase.co`
 - Region: `eu-west-1`
-- Plan: Free at time of writing — **builder must upgrade to Pro** before real
-  client use (CLAUDE.md requirement, to avoid auto-pause during a quiet stretch
-  of a multi-week questionnaire window)
+- Plan: Free — builder decided to stay on Free (2026-09-18); accepted risk:
+  personal and resume links break while the project is paused after ~1 week
+  without traffic. Open a survey link weekly during a survey window.
+
+## Migrations applied this session (in order)
+1. `v2_retire_old_objects` — unscheduled the `sync_ratings_to_assessor_ratings`
+   cron job, dropped that function, `assessor_ratings`, `increment_respondents`,
+   `session_comments`, `participants`; cleared the old-shape `ratings`, `iros`
+   and the demo `assessments` row (v1.1-shaped, no `submission_id`/`justification` —
+   exported first, see backup file above)
+2. `v2_new_tables` — created `clients`, `practice_settings`, `cycles`,
+   `threshold_changes`, `invitations`, `live_sessions`,
+   `live_session_participants`, `attendance_edit_log`, `submissions`,
+   `topic_justifications`; RLS enabled on all
+3. `v2_alter_existing_tables` — changed `assessments`, `iros`, `ratings`,
+   `topic_library`, `calibrations`, `stakeholder_groups` per the shared
+   migration's "Changed" list
+4. `v2_drop_old_policies`, `v2_drop_old_calibration_policies` — removed v1.1
+   RLS policies before replacing them
+5. `v2_rls_policies_and_views` — full RLS matrix (anon + authenticated) across
+   every table, plus the `combined_ratings` view
+6. `v2_fix_cycle_anon_access` — replaced a `SECURITY DEFINER`-style view (flagged
+   ERROR by the Supabase security linter) with column-grant + RLS on `cycles`
+   directly, matching the pattern already used for `invitations`
+7. `v2_seed_demo_assessment` — re-created the `acme-2026` demo assessment,
+   cycle, client and a demo invitation in the new structure
+8. `v2_frontend_support` — widened the anon column grant on `cycles` to
+   include `stage` and `client_id` (needed to detect a closed survey and to
+   look up the client logo), added a unique constraint on
+   `ratings (submission_id, iro_id, criterion_key)` so draft saves can
+   upsert, and added `submit_survey_response(...)`, an atomic all-or-nothing
+   submit function
+9. `v2_fix_submit_rpc_no_delete` — bug fix: the first version of
+   `submit_survey_response` deleted existing draft rows before re-inserting;
+   anon has no DELETE policy on `ratings`/`topic_justifications` (correctly,
+   per spec), so under `SECURITY INVOKER` that delete silently affected 0
+   rows and the re-insert then hit the new unique constraint. Rewritten to
+   use `ON CONFLICT ... DO UPDATE` instead — no delete anywhere, satisfies
+   the existing INSERT/UPDATE policies as-is
 
 ## Tables
 
-### assessments
-Owned/written by the Consultant Console (Tool B). This tool only reads it.
-
+### clients — New. Owned by Tool B.
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid, PK | default `gen_random_uuid()` |
-| name | text | used as the "company name" in the Welcome screen title |
-| description | text | nullable |
-| mode | text | `quantitative` \| `qualitative` |
-| perspective_filter | text | `full` \| `impact` \| `financial` |
-| status | text | default `'draft'` |
-| start_date | date | nullable |
-| end_date | date | nullable |
-| slug | text | unique — this is the public link identifier (`/survey/:slug`) |
-| logo_url | text | nullable |
-| welcome_text | text | nullable |
-| task_text | text | nullable — **not currently read** by the ported `ParticipantExperience.jsx` (see PROGRESS.md Build decisions) |
-| mandatory | bool | default `false` |
-| created_at | timestamptz | default `now()` |
-| respondents_done | integer | default `0` — added by Tool B session 1; incremented by this tool via the `increment_respondents` RPC on each submission, see below |
-| respondents_total | integer | default `0` — added by Tool B session 1; set by Tool B at assessment creation, not read/written by this tool |
-| created_by | uuid, FK → auth.users | added by Tool B session 1 |
-| updated_at | timestamptz | added by Tool B session 1 |
-
-### iros
-Owned/written by the Consultant Console (Tool B). This tool only reads it.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid, PK | default `gen_random_uuid()` |
-| assessment_id | uuid, FK → assessments.id | `on delete cascade` |
-| esrs_topic_id | text | e.g. `E1`, `S2`, `G1` |
-| subtopic_raw | text | nullable |
 | name | text | |
-| description | text | nullable |
-| iro_type | text | `neg_impact` \| `pos_impact` \| `risk` \| `opportunity` |
-| actual | bool | default `false` — actual vs. potential |
-| impact_threshold | numeric | nullable, default `3.0` — unused by this tool (Tool B's scoring input) |
-| financial_threshold | numeric | nullable, default `3.0` — unused by this tool |
-| order | integer | default `0` — display order on the participant side |
+| logo_url | text | nullable — set via Supabase Storage upload in Tool B |
 | created_at | timestamptz | default `now()` |
-| topic_library_id | uuid, FK → topic_library.id | nullable — added by Tool B; unused by this tool |
-| session_notes | text | nullable — added by Tool B; unused by this tool |
 
-### ratings
-Owned/written by this tool (Participant Questionnaire). Tool B reads it.
-
+### practice_settings — New. Owned by Tool B. One row.
 | Column | Type | Notes |
 |---|---|---|
-| id | uuid, PK | default `gen_random_uuid()` |
-| assessment_id | uuid, FK → assessments.id | `on delete cascade` |
-| iro_id | uuid, FK → iros.id | `on delete cascade` |
-| criterion_key | text | `scale` \| `scope` \| `irreversibility` \| `likelihood` \| `magnitude` \| `financialLikelihood` |
-| value | integer, nullable | 0–5, `null` means skipped |
-| stakeholder_group | text | free text label chosen on the Stakeholder Group screen |
-| session_id | uuid | generated client-side once per participant visit |
-| submitted_at | timestamptz | default `now()` |
+| id | uuid, PK | |
+| consultant_logo_url | text | nullable |
 
-Indexes: `iros(assessment_id)`, `ratings(assessment_id)`, `ratings(iro_id)`,
-`assessments(slug)`, `session_comments(assessment_id)`.
-
-### session_comments
-Owned/written by this tool (Participant Questionnaire). Added session 3 (v1.1
-revision) — the Submit screen's optional "Any other comments?" field writes
-here. Not currently read by anything in this tool or Tool B (per CLAUDE.md,
-out of scope for now).
-
+### cycles — New. Owned by Tool B. This tool only reads `esrs_version` (narrowly).
 | Column | Type | Notes |
 |---|---|---|
-| id | uuid, PK | default `gen_random_uuid()` |
-| assessment_id | uuid, FK → assessments.id | `on delete cascade` |
-| session_id | uuid | same client-generated session id used on `ratings` rows |
-| comment | text | not null — the app only inserts a row when the field was filled in |
-| submitted_at | timestamptz | default `now()` |
+| id | uuid, PK | |
+| client_id | uuid, FK → clients | `on delete cascade` |
+| name | text | |
+| financial_year | integer | |
+| esrs_version | text | `esrs_2023_amended` \| `esrs_2026` |
+| stage | text | `collecting` \| `calibrating` \| `signed_off`, default `collecting` |
+| impact_threshold, financial_threshold | numeric | default 3.0 each |
+| baseline_impact_threshold, baseline_financial_threshold | numeric | default 3.0 each |
+| require_both_sources | bool | default `false` |
+| silent_stakeholders_considered | bool | default `false` |
+| silent_stakeholders_note | text | nullable |
+| methodology_version, approver_name, approver_role, minutes_reference | text | nullable |
+| signed_off_at | timestamptz | nullable |
+| signed_off_recorded_by, created_by | uuid, FK → auth.users | nullable |
+| created_at | timestamptz | default `now()` |
 
-## RLS Policies
-
-| Table | Policy | Effect |
+### threshold_changes — New. Owned by Tool B. Append-only.
+| Column | Type | Notes |
 |---|---|---|
-| assessments | `anon select assessments` | `anon` role can `select` — the app always filters by exact `slug`, so this is a point-lookup in practice, not a public listing |
-| iros | `anon select iros` | `anon` role can `select` — the app always filters by exact `assessment_id` obtained from the assessments lookup |
-| ratings | `anon insert ratings` | `anon` role can `insert` only — no select/update/delete from the anon role |
-| session_comments | `anon insert session_comments` | `anon` role can `insert` only — no select/update/delete from the anon role |
+| id | uuid, PK | |
+| cycle_id | uuid, FK → cycles | `on delete cascade` |
+| axis | text | `impact` \| `financial` |
+| old_value, new_value | numeric | |
+| reason | text | nullable |
+| changed_by | uuid, FK → auth.users | nullable |
+| changed_at | timestamptz | default `now()` |
 
-No insert/update/delete policy exists on `assessments` or `iros` for `anon` — those
-tables are read-only from this tool's side, matching CLAUDE.md.
+### assessments — Changed. Owned by Tool B. This tool reads it.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| cycle_id | uuid, FK → cycles | **new** |
+| type | text | **new**, replaces `mode` — `expert_survey` \| `expert_live_session` |
+| name, description | text | description nullable |
+| perspective_filter | text | `full` \| `impact` \| `financial` |
+| status | text | free text, default `'draft'` (demo uses `'active'`) |
+| start_date, end_date | date | nullable |
+| slug | text | unique — public link identifier for the survey route |
+| welcome_text, task_text | text | nullable |
+| mandatory | bool | default `false` |
+| justification_mode | text | **new** — `per_criterion` (default) \| `per_topic` |
+| created_at, updated_at | timestamptz | |
+| created_by | uuid, FK → auth.users | nullable |
 
-### Respondent counting (added this session)
-Product need: the consultant wants to know how many people actually
-completed each survey. Rather than grant `anon` a general `UPDATE` on
-`assessments` (which would let a participant's browser rewrite any column on
-the row), Tool B added a narrow `SECURITY DEFINER` SQL function:
+**Retired columns:** `mode` (→ `type`), `logo_url` (client logo used instead,
+via `cycle_id` → `cycles.client_id` → `clients.logo_url`), `respondents_done`,
+`respondents_total` (counts now derived from `invitations` + `submissions`).
 
-```sql
-create or replace function public.increment_respondents(p_assessment_id uuid)
-returns void
-language sql security definer set search_path = public
-as $$
-  update public.assessments set respondents_done = respondents_done + 1
-  where id = p_assessment_id;
-$$;
-grant execute on function public.increment_respondents(uuid) to anon;
-```
+### topic_library — Changed. Owned by Tool B, the master IRO library.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| iro_type | text | `neg_impact` \| `pos_impact` \| `risk` \| `opportunity` |
+| esrs_topic_id | text | E1–G1 |
+| esrs_subtopic, short_title, description | text | subtopic/description nullable |
+| actual | bool | default `false` |
+| value_chain | text | nullable — `own` \| `upstream` \| `downstream` |
+| esrs_version | text | **new** — `esrs_2023_amended` \| `esrs_2026`, backfilled `esrs_2023_amended` |
+| time_horizon | text | **new**, nullable |
+| potential_human_rights_impact | bool | **new**, default `false` |
+| client_id | uuid, FK → clients | **new**, nullable — empty means shared master topic |
+| reference_code | text | unique |
+| signed_off_by | text | nullable |
+| signed_off_at | timestamptz | nullable |
+| created_at | timestamptz | |
 
-This tool calls it (`incrementRespondents()` in `src/lib/data.js`) right after
-a successful submit. It can only ever do this one increment — no other column
-is reachable through it. `get_advisors` flags two expected WARN-level lints
-("anon/authenticated can execute a SECURITY DEFINER function") — that's the
-intended design, not an oversight.
+### iros — Changed. Owned by Tool B (snapshot at assessment creation). This tool reads/writes ratings against it.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| assessment_id | uuid, FK → assessments | `on delete cascade` |
+| topic_library_id | uuid, FK → topic_library | nullable |
+| esrs_topic_id | text | |
+| name, description | text | description nullable |
+| iro_type | text | `neg_impact` \| `pos_impact` \| `risk` \| `opportunity` |
+| actual | bool | default `false` |
+| time_horizon | text | **new**, nullable |
+| potential_human_rights_impact | bool | **new**, default `false` |
+| session_notes | text | nullable |
+| order | integer | default `0` |
+| created_at | timestamptz | |
 
-**One-submission-per-browser** is a plain `localStorage` flag
-(`apus_submitted_<assessmentId>`, see `App.jsx`), not an IP check — no
-server-side code, no IP address stored (simpler GDPR posture), matching what
-most lightweight survey tools do. It's a courtesy, not a hard security
-boundary: clearing storage or switching browsers resets it.
+**Retired columns:** `subtopic_raw`, `impact_threshold`, `financial_threshold`
+(unused — never read by the ported UI, not in the v2.0 field list).
 
-## Protected tables (owned by Tool B — never modified by Tool A)
-Per Tool A's CLAUDE.md Hard Rules, Tool A must never change schema, RLS, or
-write to these. Confirmed live in the project:
-`assessor_ratings`, `calibrations`, `calibration_history`, `participants`,
-`stakeholder_groups`, `stakeholder_members`, `topic_library`.
+### stakeholder_groups — Changed. Owned by Tool B, the master stakeholder map. This tool reads it (anon, all rows — needed to render the "About you" group picker).
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| name | text | |
+| type | text | **new**, nullable — `impact` \| `financial` \| `silent`; backfilled from the old `perspectives` array where it held exactly one value, left `null` for the ungrouped entries carried over from the v1.1 stakeholder map |
+| perspectives | text[] | kept alongside `type` per spec's field list |
+| order | integer | |
 
-Tool A's data layer (`src/lib/data.js`) does a read-only, best-effort read
-of `stakeholder_groups`/`stakeholder_members` (not `stakeholder_options` —
-that table was never actually created; the real names are these two) for the
-Stakeholder Group screen, and falls back to the spec's default option lists
-if the read fails or returns no rows — see Tool A's PROGRESS.md.
+Three silent-stakeholder presets seeded: Nature and ecosystems, Species and
+biodiversity, Future generations (`type = 'silent'`, custom entries allowed).
 
-## Environment variables
-- `VITE_SUPABASE_URL` = `https://evwmxduudcujtibirmga.supabase.co`
-- `VITE_SUPABASE_ANON_KEY` = the **publishable key** (`sb_publishable_...`),
-  not the legacy anon JWT. Both work with `@supabase/supabase-js`, but use
-  the publishable key — see the incident note below. Get it from Project
-  Settings → API Keys → Publishable key. Set both as Netlify environment
-  variables at deploy time; never commit real values (`.env` is gitignored,
-  `.env.example` has empty placeholders).
+### stakeholder_members — Unchanged shape. Owned by Tool B. **No longer anon-readable** (see RLS below).
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| group_id | uuid, FK → stakeholder_groups | |
+| name, role | text | |
+| company, email, expertise | text | nullable |
+| pillars | text[] | default `{}` |
+| created_at | timestamptz | |
 
-## ✅ Security note — RESOLVED in Tool B session 1
-Was: live policy inspection (`pg_policies`) found `anon`-role
-**INSERT/UPDATE/DELETE** policies, named `TEMP anon insert/update/delete ...`,
-on three tables Tool B owns: `stakeholder_groups`, `stakeholder_members`, and
-`topic_library` (the latter also had a redundant `TEMP anon select`). That
-meant the public anon key — the one Tool A ships to every browser — could
-write to Tool B's tables, not just read them. Read as scaffolding left over
-from an earlier build/test session.
+### invitations — New. Owned by Tool B. This tool only reads/writes a narrow column set (never `name`/`email`).
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| assessment_id | uuid, FK → assessments | `on delete cascade` |
+| name, email | text | **never exposed to anon** |
+| stakeholder_group_id | uuid, FK → stakeholder_groups | the group the consultant *expects* — not binding, "About you" is never pre-filled |
+| link_code | text | unique, unguessable — the personal link's secret |
+| status | text | `invited` \| `opened` \| `saved` \| `submitted`, default `invited` |
+| sent_at, opened_at, last_saved_at, submitted_at, anonymised_at | timestamptz | nullable |
+| created_at | timestamptz | |
 
-Fixed in Tool B session 1 (this tool owns these tables, so this was in scope
-to fix directly): dropped all 10 `TEMP anon *` policies via
-`apply_migration` (`drop_temp_anon_write_policies`). Current state:
-`stakeholder_groups`/`stakeholder_members` keep their permanent `anon select`
-(needed by Tool A's Stakeholder Group screen) plus `authenticated full
-access`; `topic_library` has no `anon` access at all now (Tool A never reads
-it directly — it only reads the per-assessment `iros` rows, which are synced
-from `topic_library` at assessment-creation time).
+### submissions — New. Owned/written by this tool.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| assessment_id | uuid, FK → assessments | `on delete cascade` |
+| source | text | `expert_survey` \| `expert_live_session` |
+| invitation_id | uuid, FK → invitations | nullable — set for `expert_survey`, **unique** (one submission per invitation) |
+| live_session_id | uuid, FK → live_sessions | nullable — set for `expert_live_session` |
+| status | text | `draft` \| `submitted`, default `draft` |
+| stakeholder_group | text | the group the expert chose (About you) |
+| perspective | text | `impact` \| `financial` |
+| expertise_topics | text[] | E1–G1 / Other, multi-select |
+| expertise_explanation | text | |
+| title, basis_for_representation, overall_comment | text | nullable |
+| consent_given_at | timestamptz | nullable |
+| current_topic_index | integer | default `0` |
+| last_saved_at | timestamptz | default `now()` |
+| submitted_at | timestamptz | nullable |
+| created_at | timestamptz | |
 
-## Notes for future sessions
-- **Incident (session 3):** the deployed app showed `Survey misconfigured` /
-  `TypeError: Failed to execute 'set' on 'Headers': String contains non
-  ISO-8859-1 code point` on every load. Root cause: the legacy anon JWT
-  pasted into Netlify's `VITE_SUPABASE_ANON_KEY` had picked up a stray
-  non-Latin1 character somewhere in the copy/paste chain, and
-  `supabase-js` puts this value straight into an HTTP header (`apikey`),
-  which the browser's `Headers.set()` rejects outright for any character
-  outside ISO-8859-1. Fixed by switching to the shorter, plain-ASCII
-  **publishable key** instead of the legacy JWT — same effect, much less
-  copy/paste risk. `src/lib/supabaseClient.js` and `src/lib/data.js` also
-  gained better error surfacing (per-variable presence/length diagnostics,
-  and real Postgrest error messages instead of a flat "not found") while
-  chasing this down — those are worth keeping even though the root cause
-  turned out to be Netlify-side.
-- Netlify's env-var dashboard does **not** apply a changed value to an
-  already-built deploy — even "Retry deploy" on an existing deploy entry
-  reused the old value. Only **"Clear cache and deploy site"** on a fresh
-  deploy action actually re-reads current env vars. Worth remembering for
-  any future "I changed the env var but nothing happened" report.
-- This session's sandbox could not reach `*.supabase.co` directly (organization
-  egress policy blocks it for direct HTTPS/browser traffic) — schema changes went
-  through fine via the Supabase MCP tool, but a live browser test of the deployed
-  frontend against this project could not be done from within this session. Test
-  on Netlify (or the builder's own machine) once deployed.
-- A demo assessment (`slug = 'acme-2026'`, 5 IROs covering all four `iro_type`
-  values) was inserted for testing — safe to delete once real assessments exist.
-- `stakeholder_options` was never created — the real tables are
-  `stakeholder_groups`/`stakeholder_members` (see Tool B additions below);
-  Tool A's `fetchStakeholderOptions` already falls back gracefully.
+`submissions_source_reference` check constraint enforces exactly one of
+`invitation_id` / `live_session_id` is set, matching `source`.
 
----
+### ratings — Changed. Owned/written by this tool (and, later, Tool B for live sessions).
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| submission_id | uuid, FK → submissions | **new**, `on delete cascade` — replaces the old bare `session_id` |
+| assessment_id | uuid, FK → assessments | kept (denormalized, per spec) |
+| iro_id | uuid, FK → iros | |
+| criterion_key | text | `scale` \| `scope` \| `irreversibility` \| `likelihood` \| `magnitude` — **`financialLikelihood` retired**; CLAUDE.md's Business Rules list "risk or opportunity = magnitude, likelihood" and product-spec.md Section 9 confirm `likelihood` is reused for risk/opportunity, not a separate key |
+| value | integer, nullable | 0–5, `null` = skipped |
+| justification | text | **new**, nullable — required whenever `value` is set and `justification_mode = per_criterion` |
 
-## Tool B additions (session 1 — Consultant Console)
+**Retired columns:** `stakeholder_group`, `session_id` (both moved to
+`submissions`).
 
-### Tables added — all live, matching docs/schema-draft.md exactly
-`topic_library`, `assessor_ratings`, `calibrations`, `calibration_history`,
-`participants`, `stakeholder_groups`, `stakeholder_members` — full field
-lists and RLS design are in `docs/schema-draft.md`; live inspection this
-session confirmed the columns match, plus two columns on `iros` that
-schema-draft.md called for but weren't yet documented anywhere:
-`topic_library_id` (FK → topic_library, nullable) and `session_notes`
-(text, nullable — the qualitative live-session per-topic notes field from
-product-spec.md Section 8, surfaced in this tool's Results and Calibration
-tabs).
+### topic_justifications — New. Owned/written by this tool.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| submission_id | uuid, FK → submissions | `on delete cascade` |
+| iro_id | uuid, FK → iros | `on delete cascade` |
+| justification | text | required when `justification_mode = per_topic` |
 
-### RLS — as designed in schema-draft.md, confirmed live
-`authenticated` has full read/write (no delete on `assessor_ratings` or
-`calibrations`; `calibration_history` is insert+read only — append-only by
-policy) on all seven tables above. `anon` has select-only on
-`stakeholder_groups`/`stakeholder_members` (for Tool A's Stakeholder Group
-screen) and no access at all to the other five. See the resolved Security
-note above for the write-access holes found and closed this session.
+Unique on `(submission_id, iro_id)` — one topic justification per topic per
+submission.
 
-### Auth
-Magic link via Supabase Auth (`supabase.auth.signInWithOtp`), one shared
-permission level, no roles table — matches CLAUDE.md exactly. Whether public
-signup is disabled (true invite-only, vs. anyone with a magic link creating
-an account) is a Supabase dashboard **Auth → Settings** toggle this session
-did not change — confirm it's set to disabled before real client use.
+### live_sessions, live_session_participants, attendance_edit_log — New. Owned by Tool B (Tier 3, live facilitation). This tool never reads or writes these.
+See product-spec-tool-b-consultant-console.md Section 5 for full field
+definitions; created here as part of the shared migration, RLS restricted to
+`authenticated` only.
 
-### `ratings` → `assessor_ratings` reconciliation — SOLVED (session 1, same day)
-Tool A's `ratings` is one row per (IRO × criterion × participant session);
-this tool's `assessor_ratings` is one row per (IRO × assessor), which is
-what `src/lib/calc.js` (ported verbatim from the reference prototype)
-expects. This tool never reads `ratings` directly — it's explicitly
-protected (CLAUDE.md: "read only, never write, never alter its schema or
-RLS"), and `ratings` has **no SELECT policy for any role** anyway, so there
-was no RLS-compliant way to read it even without that rule.
+### calibrations — Changed. Owned by Tool B.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, PK | |
+| cycle_id | uuid, FK → cycles | **new** |
+| iro_id | uuid, FK → iros | |
+| owner, moderator, notes | text | nullable |
+| calibrated_value | numeric | nullable |
+| band_value | integer | nullable, 1–5 |
+| reviewed_with_owner | bool | **new**, default `false` |
+| reviewed_with_owner_at | timestamptz | **new**, nullable |
+| calibrated_at | timestamptz | nullable |
 
-**Solution: a `pg_cron` job inside Postgres, not a service-role-backed
-Edge/Netlify Function.** The builder approved building a real sync (not a
-manual one), but a scheduled internal Postgres job turned out to be
-strictly better than the Edge Function + `SUPABASE_SERVICE_ROLE_KEY`
-approach originally sketched: it never touches `ratings`' schema, RLS, or
-adds a trigger to it (the job just runs a `SELECT`/`INSERT` on a schedule,
-as a privileged internal role that bypasses RLS the same way a service key
-would); it needs zero new credentials in Netlify or anywhere in the app;
-and it doesn't require CLAUDE.md's "flag to the builder first" step for the
-service role key, because that key is never used.
+**Retired columns:** `signed_off_by`, `signed_off_at` (sign-off now lives on
+`cycles`, one record per cycle rather than per calibration).
 
-Implementation (migration `setup_ratings_sync`):
-- Enabled the `pg_cron` extension.
-- Added `assessor_ratings.synced_ratings_session_id` (uuid, nullable) —
-  tracks which `ratings.session_id` a row came from, making the sync
-  idempotent (never double-inserts the same session for the same IRO).
-  Null for any row entered directly later via the future
-  QuantAssessmentGrid (manual consultant entry, not synced from Tool A).
-- `public.sync_ratings_to_assessor_ratings()` — a `SECURITY DEFINER`
-  function that pivots any `ratings` rows not yet represented (by the
-  tracking column) into `assessor_ratings`, grouped by
-  `(iro_id, session_id, stakeholder_group)`.
-- `cron.schedule('sync-ratings-to-assessor-ratings', '*/10 * * * *', ...)`
-  — runs every 10 minutes. Job id 1, confirmed active in `cron.job`.
-- The original one-time manual backfill's 10 rows were deleted and
-  regenerated by this function instead, so there's one single, idempotent
-  code path for this data rather than two different origins.
-- **Tested this session:** inserted a throwaway `ratings` row, ran the sync
-  function manually, confirmed the corresponding `assessor_ratings` row
-  appeared with the right values, then deleted both test rows. Verified
-  back at the original 30 `ratings` / 10 `assessor_ratings` counts
-  afterward.
+### calibration_history — Unchanged. Owned by Tool B. Append-only.
 
-Real submissions now reach the dashboard within 10 minutes automatically —
-no manual step, no stale data, no new secrets.
+### combined_ratings — New view (not a table). Owned by Tool B, `authenticated`-only.
+One row per **submitted** rating: `submission_id`, `cycle_id`, `assessment_id`,
+`source`, `iro_id`, `criterion_key`, `value`, `justification` (the criterion's,
+or the topic's when the mode is per topic, via `coalesce`), `stakeholder_group`,
+`perspective`, `expertise_topics`, `invitation_id`, `live_session_id`.
 
-### Known gap: no Netlify deploy yet
-This session built the frontend (`src/`) and verified it locally
-(`npm run build`, `npm run lint`, and a headless-browser render of the
-Login screen) but did not deploy it — see PROGRESS.md.
+## RLS — full matrix (built this session, Tool A CLAUDE.md rules + Tool B spec Section 6)
+
+**Anon (unauthenticated, public survey):**
+| Table | Access |
+|---|---|
+| assessments, iros, clients, stakeholder_groups | SELECT, all columns, all rows (row-level scoping isn't possible without an auth identity — same accepted pattern as v1.1; data is non-sensitive display content) |
+| cycles | SELECT limited to columns `(id, esrs_version, stage, client_id)` via column grant — thresholds, sign-off/approver fields stay internal. `stage` and `client_id` were added in `v2_frontend_support` (needed for the closed-survey check and the client logo lookup) |
+| invitations | SELECT limited to columns `(id, assessment_id, link_code, status, submitted_at)`; UPDATE limited to columns `(status, opened_at, last_saved_at, submitted_at)` — `name`/`email` never exposed or writable. No general SELECT/UPDATE policy exists; access is column-grant-scoped on top of a `using (true)` policy, so the *column grant* is the real boundary |
+| submissions | SELECT all; INSERT (`source = 'expert_survey'` only); UPDATE only while `status = 'draft'` |
+| ratings, topic_justifications | SELECT all; INSERT/UPDATE only while the parent submission is a draft (checked via `EXISTS` subquery against `submissions.status`) |
+| stakeholder_members | **no access** — Tool A's CLAUDE.md read list never included this table; the v1.1 "anon select stakeholder_members" policy was dropped this session, not carried forward |
+| topic_library, practice_settings, threshold_changes, live_sessions, live_session_participants, attendance_edit_log, calibrations, calibration_history | no access |
+| All tables | **no DELETE ever** for anon |
+
+**Authenticated (Tool B, magic-link login, one shared access level):** full
+matrix per product-spec-tool-b-consultant-console.md Section 6 — SELECT/INSERT/UPDATE
+on nearly everything, with DELETE gated by state (`clients` only if no cycles,
+`cycles`/`assessments` only if no responses exist, `cycles` UPDATE blocked once
+`stage = 'signed_off'`, `invitations` DELETE only before `opened_at`,
+`live_sessions` DELETE only before `started_at`; `threshold_changes`,
+`attendance_edit_log`, `calibration_history` are append-only — no
+UPDATE/DELETE policy exists for any role).
+
+> Every table has RLS enabled — confirmed via `list_tables`. Two migrations
+> (`v2_drop_old_policies`, `v2_drop_old_calibration_policies`) were needed to
+> clear v1.1 policy names before the new ones could be created — `apply_migration`
+> runs each call in a transaction, so the one failed attempt rolled back cleanly
+> with no partial state (verified via `pg_policies` before retrying).
+
+## Functions added this session
+
+### submit_survey_response(p_invitation_id, p_overall_comment, p_ratings, p_topic_justifications) → uuid
+`SECURITY INVOKER` (runs as the calling role — anon's existing RLS policies
+apply as normal; this function only makes the multi-table write atomic, it
+does not widen access). Upserts every rating row and topic justification for
+the draft submission tied to `p_invitation_id`, then marks the submission and
+invitation `submitted`. Raises if no draft exists or it's already submitted.
+Granted `EXECUTE` to `anon`. This is the only all-or-nothing write in the
+tool (product-spec.md: "written as one complete, all-or-nothing submission
+... or nothing at all") — everything else (draft saves) is plain
+best-effort upserts, since drafts never count in results.
+
+## Retired functions, triggers and jobs
+- `increment_respondents(uuid)` — dropped (was `SECURITY DEFINER`, callable by
+  `anon`/`authenticated`, flagged by the security advisor pre-migration)
+- `sync_ratings_to_assessor_ratings()` — dropped, along with the `pg_cron` job
+  (`jobid 1`, `*/10 * * * *`) that called it every 10 minutes
+- `cycle_public_info` view — created then immediately replaced in the same
+  session: it used the `SECURITY DEFINER`-equivalent pattern (`security_invoker = false`)
+  to expose `esrs_version` to anon, which the Supabase security linter flags at
+  ERROR level (`security_definer_view`). Replaced with the column-grant pattern
+  used everywhere else in this schema (see `cycles` above) — verified clean
+  with `get_advisors` afterward (only the pre-existing, unrelated
+  "leaked password protection disabled" Auth warning remains)
+
+## Demo data (re-created this session, new structure)
+- Client: **Acme Corp**
+- Cycle: "Acme Corp DMA 2026", FY2026, `esrs_2023_amended`, stage `collecting`,
+  thresholds 3.0/3.0
+- Assessment: slug `acme-2026`, `type = expert_survey`,
+  `justification_mode = per_criterion`, `mandatory = true`, `status = active`
+- 10 IROs snapshotted from `topic_library` (all current master-library topics —
+  a mix of `neg_impact`, `pos_impact`, `risk` and `opportunity` across E1, E2,
+  E5, S1, S2, G1)
+- 1 demo invitation: name "Demo Expert" (placeholder — GDPR-safe, not a real
+  person), stakeholder group "Employees", `link_code = 33168bb608ca541d0a44a623`,
+  status `invited`
+- `stakeholder_groups` (34 rows: 31 original + 3 new silent presets) and
+  `stakeholder_members` (3 test rows: "k", "test", "s" — pre-existing test
+  data, confirmed non-real before the migration) carried forward unchanged
+
+## Notes
+- Network egress from the Claude Code sandbox to `*.supabase.co` is blocked by
+  this environment's proxy policy (confirmed via `curl -v` — `CONNECT tunnel
+  failed, response 403`; same restriction noted in earlier sessions for
+  click-testing). RLS/grants were verified via Supabase MCP `execute_sql`
+  (which runs server-side, not through the sandboxed network) rather than a
+  live REST call with the anon key. A real click-through still needs a Netlify
+  deploy preview or a browser outside this sandbox, same as before.
+- Builder must still upgrade to Pro before real client use if the accepted
+  Free-plan risk (link breakage during a pause) becomes unacceptable — no
+  change to that decision this session.
