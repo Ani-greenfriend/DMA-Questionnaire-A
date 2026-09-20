@@ -44,6 +44,19 @@ Manual export of the pre-migration state: `docs/backups/pre-v2.0-migration-2026-
    directly, matching the pattern already used for `invitations`
 7. `v2_seed_demo_assessment` — re-created the `acme-2026` demo assessment,
    cycle, client and a demo invitation in the new structure
+8. `v2_frontend_support` — widened the anon column grant on `cycles` to
+   include `stage` and `client_id` (needed to detect a closed survey and to
+   look up the client logo), added a unique constraint on
+   `ratings (submission_id, iro_id, criterion_key)` so draft saves can
+   upsert, and added `submit_survey_response(...)`, an atomic all-or-nothing
+   submit function
+9. `v2_fix_submit_rpc_no_delete` — bug fix: the first version of
+   `submit_survey_response` deleted existing draft rows before re-inserting;
+   anon has no DELETE policy on `ratings`/`topic_justifications` (correctly,
+   per spec), so under `SECURITY INVOKER` that delete silently affected 0
+   rows and the re-insert then hit the new unique constraint. Rewritten to
+   use `ON CONFLICT ... DO UPDATE` instead — no delete anywhere, satisfies
+   the existing INSERT/UPDATE policies as-is
 
 ## Tables
 
@@ -266,7 +279,7 @@ or the topic's when the mode is per topic, via `coalesce`), `stakeholder_group`,
 | Table | Access |
 |---|---|
 | assessments, iros, clients, stakeholder_groups | SELECT, all columns, all rows (row-level scoping isn't possible without an auth identity — same accepted pattern as v1.1; data is non-sensitive display content) |
-| cycles | SELECT limited to columns `(id, esrs_version)` via column grant — thresholds, stage, sign-off/approver fields stay internal |
+| cycles | SELECT limited to columns `(id, esrs_version, stage, client_id)` via column grant — thresholds, sign-off/approver fields stay internal. `stage` and `client_id` were added in `v2_frontend_support` (needed for the closed-survey check and the client logo lookup) |
 | invitations | SELECT limited to columns `(id, assessment_id, link_code, status, submitted_at)`; UPDATE limited to columns `(status, opened_at, last_saved_at, submitted_at)` — `name`/`email` never exposed or writable. No general SELECT/UPDATE policy exists; access is column-grant-scoped on top of a `using (true)` policy, so the *column grant* is the real boundary |
 | submissions | SELECT all; INSERT (`source = 'expert_survey'` only); UPDATE only while `status = 'draft'` |
 | ratings, topic_justifications | SELECT all; INSERT/UPDATE only while the parent submission is a draft (checked via `EXISTS` subquery against `submissions.status`) |
@@ -288,6 +301,19 @@ UPDATE/DELETE policy exists for any role).
 > clear v1.1 policy names before the new ones could be created — `apply_migration`
 > runs each call in a transaction, so the one failed attempt rolled back cleanly
 > with no partial state (verified via `pg_policies` before retrying).
+
+## Functions added this session
+
+### submit_survey_response(p_invitation_id, p_overall_comment, p_ratings, p_topic_justifications) → uuid
+`SECURITY INVOKER` (runs as the calling role — anon's existing RLS policies
+apply as normal; this function only makes the multi-table write atomic, it
+does not widen access). Upserts every rating row and topic justification for
+the draft submission tied to `p_invitation_id`, then marks the submission and
+invitation `submitted`. Raises if no draft exists or it's already submitted.
+Granted `EXECUTE` to `anon`. This is the only all-or-nothing write in the
+tool (product-spec.md: "written as one complete, all-or-nothing submission
+... or nothing at all") — everything else (draft saves) is plain
+best-effort upserts, since drafts never count in results.
 
 ## Retired functions, triggers and jobs
 - `increment_respondents(uuid)` — dropped (was `SECURITY DEFINER`, callable by

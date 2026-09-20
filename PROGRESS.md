@@ -5,76 +5,84 @@
 > History lives in git.
 
 **Session:** 5
-**Last updated:** 2026-09-20 — shared v2.0 database migration complete
+**Last updated:** 2026-09-20 — v2.0 database migration + frontend rework both complete, not yet deployed
 **Live URL:** production is `questionnaire-dma.netlify.app`, deploying from
-`main`, still running v1.1 frontend code. **That frontend now queries a
-schema that no longer exists** (see Known issues) — the production demo page
-is expected to be broken until the frontend rework below ships. No real
-experts have been invited yet (GDPR section explicitly gates that on this
-work being done first), so this is an accepted transitional state, not a
-live incident.
+`main`. Still on the pre-session-5 commit (v1.1 frontend code) — this
+session's work lives on `claude/amazing-clarke-fxrzeo` and has not been
+merged/deployed yet. Production is broken in the meantime (queries a schema
+this session retired); no real experts have been invited (GDPR section gates
+that on the build being finished), so this is an accepted transitional
+state, not a live incident. Deploying this branch's work is the next step.
 
 ## Current state
-The v2.0 shared database migration (product-spec.md Section 5) is complete
-and verified. The frontend has **not** been reworked yet — that's the
-immediate next task, tracked below.
+Both the v2.0 shared database migration (product-spec.md Section 5) and the
+full frontend rework against the new schema are done — every v2.0 screen is
+built. Not yet deployed or click-tested in a live browser (this sandbox
+can't reach Supabase directly, see Known issues) and no acceptance-criteria
+pass has been run yet.
 
 Done this session:
 - Session Protocol run: pulled `main` (already current), confirmed
-  `docs/product-spec.md` is at v2.0 matching CLAUDE.md's governed version, read
-  this file, incremented to session 5
+  `docs/product-spec.md` is at v2.0 matching CLAUDE.md's governed version,
+  read this file, incremented to session 5
 - Took a full manual export of the pre-migration database (schema, RLS
   policies, function definitions, all row data) to
   `docs/backups/pre-v2.0-migration-2026-09-20.md` — confirmed by inspection
   that all pre-existing data was demo/test only (no real expert responses)
-- Ran the whole shared migration via Supabase MCP, in this order:
-  1. `v2_retire_old_objects` — unscheduled the `assessor_ratings` sync cron
-     job, dropped that function + table, dropped `increment_respondents`,
-     dropped `session_comments` and the old `participants` table, cleared the
-     v1.1-shaped `ratings`/`iros`/`assessments` rows
-  2. `v2_new_tables` — `clients`, `practice_settings`, `cycles`,
-     `threshold_changes`, `invitations`, `live_sessions`,
-     `live_session_participants`, `attendance_edit_log`, `submissions`,
-     `topic_justifications`, RLS enabled on all
-  3. `v2_alter_existing_tables` — changed `assessments`, `iros`, `ratings`,
-     `topic_library`, `calibrations`, `stakeholder_groups`
-  4. `v2_drop_old_policies` + `v2_drop_old_calibration_policies` — cleared
-     v1.1 RLS policy names (two migrations attempted the new policies first
-     and got clean `already exists` rollbacks — verified via `pg_policies`
-     that nothing partial landed before retrying)
-  5. `v2_rls_policies_and_views` — full anon + authenticated RLS matrix
-     across every table, plus the `combined_ratings` view
-  6. `v2_fix_cycle_anon_access` — the security advisor flagged a
-     `SECURITY DEFINER`-style view (`cycle_public_info`) at ERROR level;
-     replaced it with the same column-grant + RLS pattern already used for
-     `invitations`. Re-ran `get_advisors` after — clean except the
-     pre-existing, unrelated "leaked password protection disabled" Auth
-     warning
-  7. `v2_seed_demo_assessment` — re-created `acme-2026` (client, cycle,
-     assessment, 10 IROs snapshotted from `topic_library`, one demo
-     invitation) in the new structure
+- Ran the whole shared migration via Supabase MCP (9 migrations — see
+  `docs/supabase-setup.md`'s "Migrations applied this session" for the full
+  list and what each one did): retired v1.1 objects, created every new
+  table from the shared migration's list, altered every changed table, built
+  the full anon + authenticated RLS matrix, fixed a security-linter-flagged
+  view, re-seeded the `acme-2026` demo assessment, then added the frontend
+  support the rework below needed (a wider anon column grant on `cycles`,
+  a uniqueness constraint for draft upserts, and an atomic
+  `submit_survey_response` RPC — which had one bug, found and fixed the same
+  session: see Build decisions)
 - Rewrote `docs/supabase-setup.md` end to end for the new schema, full RLS
-  matrix, retired objects, and the demo data shape
+  matrix, retired objects, and functions added
 - Verified with `list_tables` (RLS enabled on all 18 public tables) and
-  `get_advisors` (security: clean)
-- Confirmed this sandbox cannot reach `*.supabase.co` directly (proxy policy
-  blocks it, `CONNECT tunnel failed, response 403`) — RLS/grants were
-  verified via Supabase MCP `execute_sql` instead of a live REST call
+  `get_advisors` (security: clean except the pre-existing, unrelated
+  "leaked password protection disabled" Auth warning)
+- Rebuilt the entire frontend against the new schema:
+  - `src/lib/data.js` — rewritten from scratch: narrow invitation lookup by
+    link code, `fetchSurveyContext` (assessment + client + cycle + IROs +
+    stakeholder groups), `isSurveyClosed`, draft fetch/create/save, and
+    `submitFinal` (calls the atomic RPC)
+  - `src/lib/criteria.js` — new: the Section 9 criteria-display rules
+    (which criteria a topic shows, based on IRO type/actual/human-rights
+    flag) and the anchor label arrays. Deliberately does **not** import the
+    old `src/lib/calc.js` (Tool B's scoring/materiality functions) — Tool A
+    never calculates, so that file was deleted from `src/` (it stays
+    findable in `reference-prototype/`, which this session didn't touch)
+  - `src/components/ExpertSurvey.jsx` — new, replaces
+    `ParticipantExperience.jsx` (deleted): every v2.0 screen — Welcome
+    (consent + data statement), About you (expertise multi-select, group
+    grids incl. silent stakeholders, basis-for-representation), Rating
+    Criteria explainer, Topic rating (per-criterion or per-topic
+    justification per `justification_mode`, Save-and-continue-later on every
+    page), the Save-and-continue confirmation screen, Submit, Thank you
+  - `src/App.jsx` — rewritten: parses `/survey/:slug/:linkCode`, looks up
+    the invitation, branches to invalid-link / already-submitted / closed /
+    the live survey
+  - `src/lib/topics.js` — added `EXPERTISE_OPTIONS` (E1–G1 + Other)
+  - `npm run build` and `npm run lint` both clean (lint's only warnings are
+    pre-existing ones in `reference-prototype/`, untouched this session)
 
 ## Last session
-Session 5 (this one): ran the v2.0 shared migration end to end — see Current
-state above for the full list. Frontend rework has not started yet.
+Session 5 (this one): ran the full v2.0 shared migration, then rebuilt the
+entire frontend against it — see Current state above for the full list.
 
 Previous session (4): extended the participant flow with a one-submission-
 per-browser guard and a respondent counter RPC — **both retired by this
-session's migration** (`increment_respondents` and
-`assessments.respondents_done`/`respondents_total` no longer exist; the
-`localStorage` guard in `App.jsx` still references a flow that's about to be
-rebuilt entirely).
+session's migration and removed from the frontend** (`increment_respondents`
+and `assessments.respondents_done`/`respondents_total` no longer exist; the
+`localStorage` guard is gone from `App.jsx`, superseded by the real
+per-invitation `submitted` status).
 
 ## Remaining work
 
-### v2.0 revision — database (this session, done)
+### v2.0 revision — database (session 5, done)
 - [x] Add `product-spec-tool-b-consultant-console.md` and `supabase-setup.md`
       to the repo (already present at session start, in `docs/`)
 - [x] Connect to the existing Supabase project, inspect the live database via
@@ -86,40 +94,30 @@ rebuilt entirely).
 - [x] Re-create the `acme-2026` demo assessment and a demo invitation in the
       new structure; update `docs/supabase-setup.md`
 
-### v2.0 revision — frontend (next, urgent — production is broken until this ships)
-- [ ] Rewrite `src/lib/supabaseClient.js` / `src/lib/data.js`: drop every
-      v1.1-shaped query (old `assessments.mode`, `ratings.session_id`,
-      `session_comments`, `increment_respondents`, the `localStorage`
-      one-submission guard); build against the new tables — link-code lookup
-      (narrow columns only, per the new `invitations` grants), draft
-      save/resume via `submissions`/`ratings`/`topic_justifications`,
-      all-or-nothing submit
-- [ ] Build Welcome — consent checkbox, the Section 7 data statement, the
-      three fixed bullets, resume-link note; drop any "fully anonymous"
-      language (GDPR outcome is now "applies")
-- [ ] Build About you — expertise multi-select (E1–G1 + Other), expertise
-      explanation, optional title, impact/financial/silent group grids from
-      `stakeholder_groups`, the "basis for representation" field for silent
-      groups; replaces the old single-select Stakeholder Group screen
-- [ ] Update Rating Criteria — reflect the new criteria display rules
-      (Section 9: potential vs. actual vs. human-rights-flagged negative
-      impacts each show a different criterion set)
-- [ ] Update Topic rating — per-criterion or per-topic justification
-      depending on `assessments.justification_mode`, per-criterion skip,
-      "Save and continue later" on every page
-- [ ] Build the Save and continue later confirmation screen with a copyable
-      personal link
-- [ ] Update Submit — `overall_comment` into `submissions` (replaces
-      `session_comments`); one all-or-nothing write across
-      `submissions`+`ratings`+`topic_justifications`
-- [ ] Build already-submitted, invalid-link and survey-closed screens
-- [ ] Local test pass with the demo personal link
-      (`link_code = 33168bb608ca541d0a44a623`, `acme-2026`), including save,
-      resume and submit — needs a Netlify deploy preview or a browser outside
-      this sandbox (see Known issues on the network restriction)
+### v2.0 revision — frontend (session 5, done)
+- [x] Rewrite `src/lib/data.js` against the new schema
+- [x] Build Welcome — consent checkbox, Section 7 data statement, three
+      fixed bullets, personal-link note
+- [x] Build About you
+- [x] Update Rating Criteria explainer
+- [x] Update Topic rating — per-criterion/per-topic justification, skip,
+      Save-and-continue-later
+- [x] Build the Save and continue later confirmation screen
+- [x] Update Submit — `overall_comment`, all-or-nothing write via RPC
+- [x] Build already-submitted, invalid-link and survey-closed screens
+
+### v2.0 revision — verification and deploy (next)
+- [ ] Local/preview test pass with the demo personal link
+      (`slug = acme-2026`, `link_code = 33168bb608ca541d0a44a623` →
+      `/survey/acme-2026/33168bb608ca541d0a44a623`), including save, resume
+      and submit — needs a Netlify deploy preview or a browser outside this
+      sandbox (see Known issues on the network restriction); nothing beyond
+      `npm run build`/`lint` has verified this code actually runs correctly
+      in a browser yet
 - [ ] Acceptance criteria pass — all 18 criteria in spec v2.0 Section 13
 - [ ] Deploy to Netlify via MCP; confirm env vars still point at the
       publishable key (unchanged this session)
+- [ ] Merge this branch to `main` once the above is confirmed working
 - [ ] Builder, before inviting any real expert: short GDPR check (legal
       basis, anonymise-on-request approach) — flagged, not blocking
 
@@ -146,7 +144,7 @@ rebuilt entirely).
   name/email) alongside the couple of fields the survey actually needs.
 - `cycles` and `invitations`: anon gets a `using (true)` RLS policy but a
   **column-level grant** restricting what that policy can actually expose —
-  `cycles` to `(id, esrs_version)`, `invitations` to
+  `cycles` to `(id, esrs_version, stage, client_id)`, `invitations` to
   `(id, assessment_id, link_code, status, submitted_at)` (never `name`/
   `email`). This is the same mechanism Postgres/PostgREST uses together
   (RLS decides *which rows*, column grants decide *which columns*), and it's
@@ -168,48 +166,79 @@ rebuilt entirely).
 - Demo IROs: snapshotted all 10 current `topic_library` rows into the new
   `acme-2026` assessment (a deliberately broader set than the old demo's 5 —
   covers `neg_impact`/`pos_impact`/`risk`/`opportunity` across six ESRS
-  topics) so the frontend rework has good coverage of the Section 9 criteria
+  topics) so the frontend has good coverage of the Section 9 criteria
   display rules to test against.
+- Submit is one Postgres function (`submit_survey_response`, `SECURITY
+  INVOKER`) rather than several client-side writes, so it's genuinely
+  atomic — matches "written as one complete, all-or-nothing submission ...
+  or nothing at all." First version deleted existing draft rows before
+  re-inserting; since anon has no DELETE policy on `ratings`/
+  `topic_justifications` (correctly, per spec — never for anon) and the
+  function runs as the caller (not `SECURITY DEFINER`), that delete
+  silently affected 0 rows under RLS and the re-insert then hit the new
+  `(submission_id, iro_id, criterion_key)` uniqueness constraint. Fixed by
+  switching to `ON CONFLICT ... DO UPDATE` — no delete anywhere, works with
+  the INSERT/UPDATE policies that already existed. Caught and fixed in
+  review before any deploy, not by a failed test run.
+- Draft progress saves (`saveProgress` in `data.js`, called on every "Next
+  topic"/"Previous topic"/"Save and continue later") are plain best-effort
+  upserts, not wrapped in the atomic RPC — only the final Submit needs the
+  all-or-nothing guarantee (drafts never count in results, so a partially-
+  saved draft is harmless).
+- Welcome re-shows the consent checkbox and requires re-ticking on every
+  visit, including resuming a saved draft, per the spec's literal wording
+  ("Get started →" disabled until ticked; a returning visitor just sees a
+  different button label). `submissions.consent_given_at` is only written
+  once, at draft creation — it records when consent was first given, not
+  re-updated on every resume.
+- URL shape for the personal link: `/survey/:slug/:linkCode` — resolved as
+  an explicitly non-blocking open question in product-spec.md Section 15
+  ("Builder + Claude Code, at build time"). The slug is cosmetic/readability
+  only; every actual lookup is by `linkCode`, which alone is the unguessable
+  key (matches CLAUDE.md: no anon access is ever gated on the slug).
+- The "About you" group grids are populated by filtering
+  `stakeholder_groups` on `type IN ('impact','silent')` and `type =
+  'financial'` — this happens to reproduce exactly the two default option
+  lists in product-spec.md Section 8 (6 impact-type groups, 5 financial-type
+  groups, from the v1.1 stakeholder map backfilled with `type` this
+  session), plus the 3 new silent presets in the impact grid.
 
 ## Known issues
-- **Frontend/database mismatch (expected, not a regression):** production's
-  deployed frontend (`main`) is still v1.1 code querying a schema this
-  session retired. Fixing this is the entire "v2.0 revision — frontend"
-  section above; until it ships, `questionnaire-dma.netlify.app` will error
-  or show stale/empty content when it queries the old shapes. No real expert
-  data exists yet, and CLAUDE.md gates real invitations on the build being
-  finished, so this is an accepted transitional state for the duration of
-  the frontend rework, not an incident to roll back from.
-- This sandbox cannot reach `*.supabase.co` directly — outbound HTTPS to it is
-  blocked by the environment's proxy policy (confirmed via verbose curl:
-  `CONNECT tunnel failed, response 403`). Schema/RLS work this session was
-  verified via Supabase MCP (`execute_sql`, `list_tables`, `get_advisors`),
-  which runs server-side rather than through this sandbox's network. A real
-  browser click-through of the survey will still need a Netlify deploy
-  preview or a browser outside this sandbox — same restriction noted in
-  session 3/4 for the v1.1 flow.
+- **Not yet deployed or click-tested.** `npm run build`/`lint` are clean and
+  the code was reviewed carefully against the spec, but no one has clicked
+  through the actual survey in a browser yet. This sandbox cannot reach
+  `*.supabase.co` directly — outbound HTTPS to it is blocked by the
+  environment's proxy policy (confirmed via verbose curl: `CONNECT tunnel
+  failed, response 403`; same restriction noted in sessions 3/4 for the v1.1
+  flow). Schema/RLS work was verified via Supabase MCP (`execute_sql`,
+  `list_tables`, `get_advisors`), which runs server-side rather than through
+  this sandbox's network — that doesn't cover frontend runtime behavior. A
+  real click-through (Welcome → About you → topics → save/resume → Submit)
+  still needs a Netlify deploy preview or a browser outside this sandbox.
+- **Frontend/database mismatch on production, until this branch deploys:**
+  `main`'s deployed frontend is still v1.1 code querying the schema this
+  session retired. No real expert data exists yet and CLAUDE.md gates real
+  invitations on the build being finished, so this remains an accepted
+  transitional state, not an incident to roll back from.
 - Supabase project still on the Free plan — builder's accepted risk (personal
   and resume links break while the project auto-pauses after ~1 week without
   traffic). Not a blocker; revisit before real client use.
-- The v1.1 respondent-count / one-submission-per-browser work from session 4
-  is fully retired by this migration (`increment_respondents`,
-  `respondents_done`/`respondents_total` all dropped) — the corresponding
-  `App.jsx`/`data.js` code is dead and will be removed as part of the
-  frontend rework, not before.
 - Before inviting any real expert, the builder gets a short GDPR check
   (business reason: audit traceability; anonymise-on-request approach). Does
   not block the build.
 
 ## Notes for next session
-Start with `src/lib/supabaseClient.js` and `src/lib/data.js` — the data layer
-has to be rebuilt against the new schema before any screen work is testable.
-Suggested order: (1) link-code lookup + survey context (assessment + client +
-cycle esrs_version, using the new narrow-grant columns), (2) draft
-create/resume (submissions + ratings + topic_justifications), (3) all-or-
-nothing submit. Then work through the screen list in the Remaining work
-section above in order (Welcome → About you → Rating Criteria → Topic rating
-→ Save-and-continue → Submit → Thank you → already-submitted/invalid/closed),
-reusing `reference-prototype/` styling per CLAUDE.md's brand rules wherever a
-screen already has a visual precedent there. Test against the demo link
-(`acme-2026`, `link_code = 33168bb608ca541d0a44a623`) on a Netlify deploy
-preview, since this sandbox can't reach Supabase directly.
+Get a real click-through: push this branch, open a Netlify deploy preview,
+and walk the demo link end to end
+(`/survey/acme-2026/33168bb608ca541d0a44a623`) — Welcome (consent), About
+you, Rating Criteria, every topic (answer some, skip some, check the
+per-criterion vs per-topic justification gating — the demo assessment's
+`justification_mode` is `per_criterion`, so also spot-check the per-topic
+path by flipping one assessment's `justification_mode` in Supabase and
+retesting), Save-and-continue-later (copy the link, reopen it, confirm
+resume lands on the right topic with earlier answers restored), Submit
+(check the atomic RPC actually commits everything), Thank you, then reopen
+the same link and confirm "already submitted" shows. Also test an invalid
+link and (by flipping the demo cycle's `stage` to `signed_off` temporarily)
+the closed-survey screen. Then run the full Section 13 acceptance criteria
+list, fix anything that surfaces, and deploy via Netlify MCP.

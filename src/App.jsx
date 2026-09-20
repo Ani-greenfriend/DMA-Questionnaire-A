@@ -1,182 +1,138 @@
 import { useEffect, useState } from 'react';
-import ParticipantExperience, { CRITERIA_FOR } from './components/ParticipantExperience';
-import ApusLogoLight from './components/ApusLogoLight';
-import { fetchAssessmentBySlug, submitRatings, submitSessionComment, incrementRespondents } from './lib/data';
+import ExpertSurvey, { SurveyShell, StatusScreen } from './components/ExpertSurvey';
+import {
+  lookupInvitationByCode, fetchSurveyContext, isSurveyClosed, fetchDraft, markInvitationOpened,
+} from './lib/data';
+import { supabaseConfigError } from './lib/supabaseClient';
 
-function slugFromPath() {
-  const match = window.location.pathname.match(/^\/survey\/([^/]+)\/?$/);
+function linkCodeFromPath() {
+  // /survey/:slug/:linkCode — the slug is cosmetic (readability only); the
+  // link code is the actual, unguessable key used for every lookup.
+  const match = window.location.pathname.match(/^\/survey\/[^/]+\/([^/]+)\/?$/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-// One submission per browser per assessment — a plain localStorage flag, not
-// an IP check: no server-side code needed, no IP address stored (simpler
-// GDPR posture), and it's what most lightweight survey tools actually do.
-// Clearing cookies/localStorage or switching browsers resets it — an accepted
-// tradeoff for this tool's scale, not a security boundary.
-function submittedKey(assessmentId) {
-  return `apus_submitted_${assessmentId}`;
-}
-function hasAlreadySubmitted(assessmentId) {
-  try {
-    return localStorage.getItem(submittedKey(assessmentId)) === '1';
-  } catch {
-    return false; // private-browsing / blocked storage — fail open, don't block a real submission
-  }
-}
-function markSubmitted(assessmentId) {
-  try {
-    localStorage.setItem(submittedKey(assessmentId), '1');
-  } catch {
-    // ignore — storage may be unavailable; the submission itself still succeeded
-  }
-}
-
-function Centered({ children }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center px-6" style={{ background: '#FAFAF8' }}>
-      <div className="text-center max-w-sm">{children}</div>
-    </div>
-  );
-}
-
 export default function App() {
-  const [slug] = useState(slugFromPath);
-  const [status, setStatus] = useState('loading'); // loading | not-found | config-error | ready
-  const [configError, setConfigError] = useState(null);
-  const [assessment, setAssessment] = useState(null);
-  const [iros, setIros] = useState([]);
-  const [stakeholders, setStakeholders] = useState(null);
-  const [sessionId] = useState(() => crypto.randomUUID());
+  const [linkCode] = useState(linkCodeFromPath);
+  const [status, setStatus] = useState('loading'); // loading | config-error | invalid-link | closed | already-submitted | ready
+  const [errorDetail, setErrorDetail] = useState(null);
+  const [context, setContext] = useState(null); // { invitation, assessment, iros, stakeholderGroups, draft }
 
   useEffect(() => {
-    if (!slug) {
-      setStatus('not-found');
+    if (supabaseConfigError) {
+      setErrorDetail(supabaseConfigError);
+      setStatus('config-error');
+      return;
+    }
+    if (!linkCode) {
+      setStatus('invalid-link');
       return;
     }
     let cancelled = false;
-    fetchAssessmentBySlug(slug)
-      .then((result) => {
+
+    (async () => {
+      try {
+        const invitation = await lookupInvitationByCode(linkCode);
         if (cancelled) return;
-        if (!result) {
-          setStatus('not-found');
+        if (!invitation) {
+          setStatus('invalid-link');
           return;
         }
-        setAssessment(result.assessment);
-        setIros(result.iros);
-        setStakeholders(result.stakeholders);
-        setStatus('ready');
-      })
-      .catch((err) => {
+
+        const surveyContext = await fetchSurveyContext(invitation.assessment_id);
         if (cancelled) return;
-        setConfigError(err.message);
+
+        if (invitation.status === 'submitted' || invitation.submitted_at) {
+          setContext({ assessment: surveyContext.assessment });
+          setStatus('already-submitted');
+          return;
+        }
+        if (isSurveyClosed(surveyContext.assessment)) {
+          setContext({ assessment: surveyContext.assessment });
+          setStatus('closed');
+          return;
+        }
+
+        markInvitationOpened(invitation.id).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error('Failed to mark invitation opened:', err);
+        });
+
+        const draft = await fetchDraft(invitation.id);
+        if (cancelled) return;
+
+        setContext({ invitation, ...surveyContext, draft });
+        setStatus('ready');
+      } catch (err) {
+        if (cancelled) return;
+        setErrorDetail(err.message);
         setStatus('config-error');
-      });
+      }
+    })();
+
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [linkCode]);
 
   if (status === 'loading') {
     return (
-      <Centered>
-        <p className="text-[13px]" style={{ color: '#8A8A94' }}>Loading survey…</p>
-      </Centered>
+      <SurveyShell>
+        <p className="text-[13px] text-center" style={{ color: '#8A8A94' }}>Loading survey…</p>
+      </SurveyShell>
     );
   }
 
   if (status === 'config-error') {
     return (
-      <Centered>
-        <p className="text-[15px] font-semibold mb-1" style={{ color: '#111318' }}>Survey misconfigured</p>
-        <p className="text-[12.5px] mb-6" style={{ color: '#8A8A94' }}>{configError}</p>
-        <div className="flex items-center justify-center gap-1.5 opacity-60">
-          <span className="text-[10.5px]" style={{ color: '#8A8A94' }}>Hosted on</span>
-          <ApusLogoLight height={13} />
-        </div>
-      </Centered>
+      <SurveyShell>
+        <StatusScreen title="Survey misconfigured" body={errorDetail} />
+      </SurveyShell>
     );
   }
 
-  if (status === 'not-found') {
+  if (status === 'invalid-link') {
     return (
-      <Centered>
-        <p className="text-[15px] font-semibold mb-1" style={{ color: '#111318' }}>Survey not found</p>
-        <p className="text-[12.5px] mb-6" style={{ color: '#8A8A94' }}>
-          This link doesn't match a live assessment. Check the link you were given, or contact whoever sent it to you.
-        </p>
-        <div className="flex items-center justify-center gap-1.5 opacity-60">
-          <span className="text-[10.5px]" style={{ color: '#8A8A94' }}>Hosted on</span>
-          <ApusLogoLight height={13} />
-        </div>
-      </Centered>
+      <SurveyShell>
+        <StatusScreen
+          title="This link isn't valid"
+          body="Please contact the person who invited you."
+        />
+      </SurveyShell>
     );
   }
 
-  if (hasAlreadySubmitted(assessment.id)) {
+  if (status === 'already-submitted') {
     return (
-      <Centered>
-        <p className="text-[15px] font-semibold mb-1" style={{ color: '#111318' }}>You've already submitted this survey</p>
-        <p className="text-[12.5px] mb-6" style={{ color: '#8A8A94' }}>
-          Thanks — your answers were recorded. This link only accepts one response per person.
-        </p>
-        <div className="flex items-center justify-center gap-1.5 opacity-60">
-          <span className="text-[10.5px]" style={{ color: '#8A8A94' }}>Hosted on</span>
-          <ApusLogoLight height={13} />
-        </div>
-      </Centered>
+      <SurveyShell logo={context.assessment.logo} companyName={context.assessment.companyName}>
+        <StatusScreen
+          title="You've already submitted this survey. Thank you."
+          body="Your answers were recorded. This link only accepts one response."
+        />
+      </SurveyShell>
     );
   }
 
-  const handleSubmit = (answers, relevantIros, stakeholderGroup, comment) => {
-    const rows = [];
-    for (const iro of relevantIros) {
-      for (const c of CRITERIA_FOR[iro.iroType]) {
-        const raw = answers[`${iro.id}::${c.key}`];
-        rows.push({
-          assessment_id: assessment.id,
-          iro_id: iro.id,
-          criterion_key: c.key,
-          value: raw === 'skipped' ? null : raw,
-          stakeholder_group: stakeholderGroup,
-          session_id: sessionId,
-        });
-      }
-    }
-    submitRatings(rows).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.error('Failed to submit ratings:', err);
-    });
+  if (status === 'closed') {
+    return (
+      <SurveyShell logo={context.assessment.logo} companyName={context.assessment.companyName}>
+        <StatusScreen
+          title="This survey is now closed"
+          body="It's no longer accepting responses. Please contact the person who invited you if you think this is a mistake."
+        />
+      </SurveyShell>
+    );
+  }
 
-    if (comment && comment.trim()) {
-      submitSessionComment({
-        assessment_id: assessment.id,
-        session_id: sessionId,
-        comment: comment.trim(),
-      }).catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error('Failed to submit comment:', err);
-      });
-    }
-
-    // Mark this browser as done regardless of whether the count below
-    // succeeds — the real ratings rows above are what matters, and a failed
-    // counter increment shouldn't let someone spam-refresh into a real
-    // duplicate submission of the actual answers.
-    markSubmitted(assessment.id);
-    incrementRespondents(assessment.id).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.error('Failed to increment respondent count:', err);
-    });
-  };
+  const initialTopicIndex = context.draft?.submission?.current_topic_index ?? 0;
 
   return (
-    <ParticipantExperience
-      mode={assessment.mode}
-      perspectiveFilter={assessment.perspectiveFilter}
-      iros={iros}
-      welcomeText={assessment.welcomeText}
-      stakeholders={stakeholders}
-      logo={assessment.logo}
-      companyName={assessment.companyName}
-      onSubmit={handleSubmit}
+    <ExpertSurvey
+      invitationId={context.invitation.id}
+      assessment={context.assessment}
+      iros={context.iros}
+      stakeholderGroups={context.stakeholderGroups}
+      draft={context.draft}
+      linkUrl={window.location.href}
+      initialTopicIndex={initialTopicIndex}
     />
   );
 }
