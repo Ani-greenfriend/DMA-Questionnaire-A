@@ -49,17 +49,16 @@ Project: "greenfriend Double Materiality Assessment" — already exists. Project
 docs/supabase-setup.md is the schema source of truth. Read it before any database work. Never create a new project; never recreate tables or policies that already exist. Update it at every save point that touches the database.
 Plan: Free — pauses after ~1 week without traffic (accepted, no upgrade planned). Before migrating: inspect the live database via Supabase MCP, reconcile docs/supabase-setup.md, and take a manual export first (no automatic backups on Free).
 
-Tables this tool writes:
+Tables this tool writes (only through the link-code functions):
 submissions: id, assessment_id, invitation_id, source ('expert_survey'), status ('draft'|'submitted'), stakeholder_group, perspective ('impact'|'financial'), expertise_topics, expertise_explanation, title, basis_for_representation, overall_comment, consent_given_at, current_topic_index, last_saved_at, submitted_at
 ratings: id, submission_id, assessment_id, iro_id, criterion_key, value (int, nullable — null means skipped), justification
 topic_justifications: id, submission_id, iro_id, justification
-Reads: assessments, iros, cycles, clients, stakeholder_groups; invitations only via a narrow lookup by link code.
+Reads: assessments, iros, cycles, clients, stakeholder_groups; invitations, submissions, ratings and topic_justifications only through the link-code functions.
 Shared migration — this build performs it exactly as listed in docs/product-spec.md Section 5 (create, change and retire lists); every field is defined in docs/product-spec-tool-b-consultant-console.md Section 5.
 
 RLS — build these policies, never skip:
-submissions, ratings, topic_justifications: anon insert/update/read only the draft matching the link code; no delete; submitted rows immutable publicly.
-assessments, iros, clients, cycles, stakeholder_groups: anon select limited to the matching link's needs; no writes.
-invitations: no direct anon select; lookup by link code; anon updates status and timestamps only.
+invitations, submissions, ratings, topic_justifications: anon has NO table-level access (no policy, no grant). All public access goes through six SECURITY DEFINER functions keyed by link code: lookup_invitation, mark_invitation_opened, get_draft, create_draft, save_progress, submit_survey_response. Never restore anon table access or a `using (true)` policy on these tables.
+assessments, iros, clients, stakeholder_groups: anon select of all rows (display content only), no writes. cycles: anon select limited by column grant to id, esrs_version, stage, client_id.
 All other tables: no anon access. `authenticated` policies: docs/product-spec-tool-b-consultant-console.md Section 6.
 
 ## Hard Rules
